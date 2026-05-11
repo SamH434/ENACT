@@ -216,3 +216,17 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ENACT
+data/*
+!data/.gitkeep
+logs/*
+!logs/.gitkeep
+screenshots/*
+!screenshots/.gitkeep
+
+# Editor
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

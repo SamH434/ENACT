@@ -5,10 +5,7 @@
 
 # ENACT (Engine for Network Anomaly, Condition, and Telemetry)
 
-ENACT is a lightweight Python network observability and telemetry platform. ENACT monitors
-connectivity health, DNS reliability, route stability, and Wi-Fi conditions, then
-stores telemetry, surfaces trends, and logs abnormal events. This project is basic
-in scale but more importantly serves as an scalable "base chassis" for future projects in parallel fields.
+ENACT is a lightweight Python-based network observability and telemetry platform that uses correlation-aware observability for anomaly detection. Each telemetry cycle is tagged with a shared correlation_id, allowing signals from all collectors to be analyzed as a unified observation window rather than isolated timelines. This enables the analyzer and dashboard layers to surface ranked, cross-signal anomalies with supporting evidence.
 
 ## Features
 

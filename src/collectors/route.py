@@ -32,7 +32,7 @@ DEFAULT_TIMEOUT_MS = 2000
 # We capture the hop number and the final token (IP or '*').
 _HOP_RE = re.compile(
     # regex reference:
-    #===================================================================
+    #================================================
     #   ^\s*(\d+)                                    - start of line, optional whitespace, then the hop number (captured but unused here).
     #   \s+.*?                                       - whitespace and then any characters, lazy, to skip the three probe times.
     #   (?:(\d+\.\d+\.\d+\.\d+)|Request timed out\.) - either an IPv4 address (captured) or the 

@@ -1,5 +1,14 @@
 """
 DNS collector - resolves a list of hostnames and times each lookup.
+
+Uses Python's socket module directly rather than spawning nslookup, 
+stdlib does the heavy lifting.
+
+FYI: socket.getaddrinfo uses whatever DNS resolver the OS is configured to
+use (router, ISP, or whatever's set manually). We tag records as 'resolver:
+system' since we don't know which one actually answered without parsing
+ipconfig. Probing specific resolvers (1.1.1.1 vs 8.8.8.8) would need a
+library like dnspython, future enhancement.
 """
 
 import socket
@@ -18,10 +27,18 @@ DEFAULT_HOSTNAMES = [
 ]
 DEFAULT_TIMEOUT_SEC = 3.0
 
+"""
+Resolves a list of hostnames each cycle and records resolution time per lookup.
 
+Failures (NXDOMAIN, timeout, network down) are recorded explicitly with
+value=None and a reason in metadata, rather than crashing or pretending the
+lookup was instant. This matters for Phase 4: averaging over None skips the
+failure, averaging over 0 would silently corrupt the result.
+"""
 class DNSCollector(Collector):
     name = "dns"
 
+    # stores config (hostnames, timeout) with sensible defaults for any unset values
     def __init__(
         self,
         hostnames: list[str] | None = None,
@@ -32,12 +49,14 @@ class DNSCollector(Collector):
         self.hostnames = hostnames or DEFAULT_HOSTNAMES
         self.timeout_sec = timeout_sec
 
+    # runs one DNS lookup across every configured hostname
     def collect(self) -> list[TelemetryRecord]:
         records: list[TelemetryRecord] = []
         for hostname in self.hostnames:
             records.append(self._resolve_one(hostname))
         return records
 
+    # resolves a single hostname, times it, and returns one record (success or failure)
     def _resolve_one(self, hostname: str) -> TelemetryRecord:
         """Resolve one hostname and time it. Records success or failure."""
         # socket has a global default timeout. Set it locally for this lookup.
@@ -66,6 +85,7 @@ class DNSCollector(Collector):
                     "success": True,
                 },
             )
+        # gaierror covers NXDOMAIN, refused, no network, etc.
         except socket.gaierror as e:
             # highest resolution clock Python offers and is monotonic (never goes backwards)
             # even if system clock gets adjusted. This is for measuring short durations
@@ -98,6 +118,8 @@ class DNSCollector(Collector):
                     "elapsed_ms": round(elapsed_ms, 2),
                 },
             )
+        # finally block always restores the global socket timeout, even if an exception fired.
+        # forgetting this would leak the short timeout to other parts of the program
         finally:
             socket.setdefaulttimeout(old_timeout)
 

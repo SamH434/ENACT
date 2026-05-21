@@ -43,10 +43,19 @@ _HOP_RE = re.compile(
     re.MULTILINE,
 )
 
+"""
+Traces the network path to each configured target and emits a fingerprint per route.
 
+The fingerprint itself is meaningless on its own. What matters is comparing
+consecutive cycles: same fingerprint means the path is stable, different
+fingerprint means something upstream changed (ISP rerouted, BGP convergence,
+local routing change). Phase 4 will combine this with latency spikes to
+flag real route-flap events.
+"""
 class RouteCollector(Collector):
     name = "route"
 
+    # stores config (targets, max hops, per-hop timeout) with sensible defaults
     def __init__(
         self,
         targets: list[str] | None = None,
@@ -58,6 +67,7 @@ class RouteCollector(Collector):
         self.max_hops = max_hops
         self.timeout_ms = timeout_ms
 
+    # runs one tracert per configured target, skips any that failed to produce hops
     def collect(self) -> list[TelemetryRecord]:
         records: list[TelemetryRecord] = []
         for target in self.targets:
@@ -66,6 +76,7 @@ class RouteCollector(Collector):
                 records.append(record)
         return records
 
+    # runs tracert against one target, parses hops, returns a single fingerprint record
     def _trace_one(self, target: str) -> TelemetryRecord | None:
         """Run tracert against one target and produce a route fingerprint record."""
         # tracert flags:
@@ -110,6 +121,7 @@ class RouteCollector(Collector):
             },
         )
 
+    # walks the tracert output, returns hop IPs in order (or '*' for timed-out hops)
     def _parse_hops(self, output: str) -> list[str]:
         """Extract the ordered list of hop IPs (or '*' for timeouts)."""
         hops: list[str] = []
@@ -118,8 +130,10 @@ class RouteCollector(Collector):
             hops.append(ip if ip else "*")
         return hops
 
+    # hashes the hop sequence into a short stable string for easy change detection
     def _fingerprint(self, hops: list[str]) -> str:
-        """Stable hash of the hop sequence. First 12 hex chars is plenty."""
+        # SHA256 is overkill for non crypto dedup but it's in stdlib and fast.
+        # truncating to 12 chars: collision risk is astronomically low for our scale
         joined = "|".join(hops)
         return hashlib.sha256(joined.encode()).hexdigest()[:12]
 

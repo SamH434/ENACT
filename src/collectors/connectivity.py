@@ -1,8 +1,14 @@
 """
-Connectivity collector - pings configured targets and emits latency/loss.
+Connectivity collector: pings configured targets and emits latency/loss.
 
 On Windows, 'ping <host> -n <count>' runs 'count' echo requests, parse the
 summary lines for sent/received/lost counts and the min/avg/max latency.
+
+Three failure modes are handled separately so a bad network never crashes
+the collector:
+    timeout:        ping hung past our deadline, emit 100% loss record
+    file not found: ping isn't installed (shouldn't happen on Windows), log and skip
+    parse failure:  output didn't match expected shape, emit 100% loss record
 """
 
 import re
@@ -19,6 +25,8 @@ DEFAULT_TIMEOUT_MS = 1000      # per ping timeout
 # Windows ping notes
 # "Packets: Sent = 4, Received = 4, Lost = 0 (0% loss),"
 # "Minimum = 8ms, Maximum = 14ms, Average = 11ms"
+# we only parse the summary block, not the per-packet "Reply from..." lines.
+# less parsing surface = fewer bugs
 _LOSS_RE = re.compile(
     r"Sent = (\d+), Received = (\d+), Lost = (\d+)"
 )
@@ -26,6 +34,13 @@ _TIMING_RE = re.compile(
     r"Minimum = (\d+)ms, Maximum = (\d+)ms, Average = (\d+)ms"
 )
 
+"""
+Pings a list of public targets each cycle and emits latency + packet loss records.
+
+One subprocess call to 'ping' per target, parsed for the summary block.
+Defaults to three well-known public DNS resolvers (Cloudflare, Google, Quad9)
+since they're reliable, low-latency, and exist specifically to be reachable.
+"""
 class ConnectivityCollector(Collector):
     name = "connectivity"
 
@@ -40,12 +55,14 @@ class ConnectivityCollector(Collector):
         self.count = count
         self.timeout_ms = timeout_ms
 
+    # runs one ping cycle across every configured target
     def collect(self) -> list[TelemetryRecord]:
         records: list[TelemetryRecord] = []
         for target in self.targets:
             records.extend(self._ping_one(target))
         return records
 
+    # pings a single target, returns 1-2 records (loss always, latency if successful)
     def _ping_one(self, target: str) -> list[TelemetryRecord]:
         """Run ping against a single target and produce records."""
         try:
@@ -65,6 +82,7 @@ class ConnectivityCollector(Collector):
         output = result.stdout
         return self._parse_ping_output(target, output)
 
+    # turns raw ping stdout into structured records, handles unparseable output gracefully
     def _parse_ping_output(self, target: str, output: str) -> list[TelemetryRecord]:
         loss_match = _LOSS_RE.search(output)
         timing_match = _TIMING_RE.search(output)
@@ -87,6 +105,7 @@ class ConnectivityCollector(Collector):
             )
         ]
 
+        # latency record only makes sense if at least one packet got through
         if timing_match and received > 0:
             min_ms = int(timing_match.group(1))
             max_ms = int(timing_match.group(2))
@@ -109,6 +128,7 @@ class ConnectivityCollector(Collector):
 
         return records
 
+    # builds a 100%-loss record for cases where the target couldn't be reached at all
     def _unreachable_record(self, target: str, reason: str) -> TelemetryRecord:
         return TelemetryRecord(
             collector=self.name,

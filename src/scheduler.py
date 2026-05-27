@@ -113,20 +113,27 @@ class Scheduler:
     def add(self, collector: Collector, interval_sec: float) -> None:
         self.workers.append(CollectorWorker(collector, interval_sec))
 
-    # starts every worker, then blocks running periodic pruning until interrupted
+    # starts every worker, then keeps the main thread alive in short, interruptible
+    # slices so Ctrl+C is responsive (long blocking waits swallow the signal on Windows)
     def run_forever(self) -> None:
         database.init_db()
         log.info("starting %d collectors", len(self.workers))
         for w in self.workers:
             w.start()
 
-        # the main thread stays alive here, periodically pruning old data.
-        # Ctrl+C raises KeyboardInterrupt, which we catch for a clean shutdown
+        # track when the next prune is due, but DON'T park the main thread on a
+        # long wait to get there. instead poll in 1-second slices: short sleeps
+        # stay interruptible by Ctrl+C, long ones don't (especially on Windows)
+        seconds_until_prune = self.prune_interval_sec
         try:
             while not self._stop.is_set():
-                self._stop.wait(self.prune_interval_sec)
-                if not self._stop.is_set():
+                # time.sleep(1) is reliably interrupted by Ctrl+C, unlike a long
+                # Event.wait(). the KeyboardInterrupt surfaces here and we catch it
+                time.sleep(1)
+                seconds_until_prune -= 1
+                if seconds_until_prune <= 0:
                     database.prune_old_data(self.retention_days)
+                    seconds_until_prune = self.prune_interval_sec
         except KeyboardInterrupt:
             log.info("shutdown requested")
         finally:

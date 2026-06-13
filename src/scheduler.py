@@ -24,6 +24,7 @@ import threading
 import time
 from datetime import datetime, timezone
 
+from src.analyzers.base import Analyzer
 from src.collectors.base import Collector
 from src.storage import database
 from src.utils.logger import get_logger
@@ -91,6 +92,57 @@ class CollectorWorker:
             self.log.error("cycle failed: %s", e)
             database.store_run(run_id, self.collector.name, duration_ms, "error", 0)
 
+"""
+Runs a single analyzer on a fixed interval in its own thread.
+
+Mirrors CollectorWorker but for analyzers. The cycle is: call analyzer.run(),
+store any returned events to the database, log the cycle. No run_id stamping
+because events already carry their own timestamp and severity.
+"""
+class AnalyzerWorker:
+
+    # binds an analyzer to its interval, sets up the thread and stop signal
+    def __init__(self, analyzer: Analyzer, interval_sec: float) -> None:
+        self.analyzer = analyzer
+        self.interval_sec = interval_sec
+        self.log = get_logger(f"enact.scheduler.{analyzer.name}")
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run_loop, daemon=True)
+
+    # starts the worker's background thread
+    def start(self) -> None:
+        self.log.info("starting analyzer (interval %.0fs)", self.interval_sec)
+        self._thread.start()
+
+    # signals the loop to stop after the current cycle
+    def stop(self) -> None:
+        self._stop.set()
+
+    # the forever-loop: run, store events, sleep, repeat, until stopped
+    def _run_loop(self) -> None:
+        while not self._stop.is_set():
+            self._run_once()
+            self._stop.wait(self.interval_sec)
+
+    # runs one analysis cycle and stores any events, never lets exceptions
+    # kill the thread (an analyzer bug shouldn't take down ENACT)
+    def _run_once(self) -> None:
+        start = time.perf_counter()
+        try:
+            events = self.analyzer.run()
+            for e in events:
+                database.store_event(
+                    e.type, e.severity, e.summary, e.evidence, e.timestamp
+                )
+            duration_ms = (time.perf_counter() - start) * 1000
+            if events:
+                self.log.info("cycle ok: %d events in %.0fms",
+                              len(events), duration_ms)
+            else:
+                # quieter log when nothing fires, the common case
+                self.log.debug("cycle ok: 0 events in %.0fms", duration_ms)
+        except Exception as e:
+            self.log.error("cycle failed: %s", e)
 
 """
 Owns the full set of collector workers and starts/stops them together.
@@ -105,6 +157,7 @@ class Scheduler:
     def __init__(self, retention_days: int = 7,
                  prune_interval_sec: float = 3600) -> None:
         self.workers: list[CollectorWorker] = []
+        self.analyzer_workers: list[AnalyzerWorker] = []
         self.retention_days = retention_days
         self.prune_interval_sec = prune_interval_sec
         self._stop = threading.Event()
@@ -113,13 +166,20 @@ class Scheduler:
     def add(self, collector: Collector, interval_sec: float) -> None:
         self.workers.append(CollectorWorker(collector, interval_sec))
 
+    # registers one analyzer to run at the given interval
+    def add_analyzer(self, analyzer: Analyzer, interval_sec: float) -> None:
+        self.analyzer_workers.append(AnalyzerWorker(analyzer, interval_sec))
+
     # starts every worker, then keeps the main thread alive in short, interruptible
     # slices so Ctrl+C is responsive (long blocking waits swallow the signal on Windows)
     def run_forever(self) -> None:
         database.init_db()
-        log.info("starting %d collectors", len(self.workers))
+        log.info("starting %d collectors and %d analyzers",
+                 len(self.workers), len(self.analyzer_workers))
         for w in self.workers:
             w.start()
+        for a in self.analyzer_workers:
+            a.start()
 
         # track when the next prune is due, but DON'T park the main thread on a
         # long wait to get there. instead poll in 1-second slices: short sleeps
@@ -139,9 +199,11 @@ class Scheduler:
         finally:
             self.stop()
 
-    # stops every worker, used during shutdown
+    # stops every worker (collectors and analyzers), used during shutdown
     def stop(self) -> None:
         self._stop.set()
         for w in self.workers:
             w.stop()
-        log.info("all collectors stopped")
+        for a in self.analyzer_workers:
+            a.stop()
+        log.info("all workers stopped")

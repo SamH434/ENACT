@@ -1,20 +1,5 @@
 """
 Base class for all ENACT analyzers.
-
-Where collectors observe the network and produce samples, analyzers observe
-the samples and produce events. An analyzer reads recent rows from the
-database, applies a rule, and emits zero or more events when it sees something
-worth flagging.
-
-Every analyzer subclasses Analyzer and implements run(), returning a list of
-Event objects. The scheduler in Phase 4 will run these on a cadence the same
-way it runs collectors.
-
-The crucial difference from collectors: when an analyzer fires an event, it
-pulls supporting samples from the SAME time window across ALL collectors and
-attaches them as 'evidence'. This is what makes an ENACT event different from
-a simple alert: it's not "latency spiked," it's "latency spiked AND here's
-what every other signal was doing in the same window."
 """
 
 from abc import ABC, abstractmethod

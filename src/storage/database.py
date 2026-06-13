@@ -136,6 +136,19 @@ def store_run(run_id: str, collector: str, duration_ms: float,
              duration_ms, status, sample_count),
         )
 
+# writes an event with its evidence to the events table
+def store_event(event_type: str, severity: str, summary: str,
+                evidence: dict, timestamp: datetime) -> None:
+    """Persist a single detected event."""
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO events (ts, type, severity, summary, evidence_json)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (timestamp.isoformat(), event_type, severity, summary,
+             json.dumps(evidence)),
+        )
 
 # ---------- query helpers (used by dashboard + analyzers later) ----------
 
@@ -175,6 +188,19 @@ def samples_in_window(start: datetime, end: datetime) -> list[sqlite3.Row]:
         )
         return cur.fetchall()
 
+# fetches recent events for the dashboard, newest first
+def recent_events(limit: int = 100) -> list[sqlite3.Row]:
+    """Most recent events across all analyzers."""
+    with _connect() as conn:
+        cur = conn.execute(
+            """
+            SELECT * FROM events
+            ORDER BY ts DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        return cur.fetchall()
 
 # deletes samples and runs older than the retention window to keep the DB small
 def prune_old_data(retention_days: int) -> int:

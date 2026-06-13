@@ -15,8 +15,10 @@ from src.collectors.connectivity import ConnectivityCollector
 from src.collectors.dns import DNSCollector
 from src.collectors.route import RouteCollector
 from src.collectors.wifi import WifiCollector
+from src.analyzers.latency_spike import LatencySpikeAnalyzer
 from src.scheduler import Scheduler
 from src.utils.logger import get_logger
+
 
 log = get_logger("enact.main")
 
@@ -31,6 +33,7 @@ def main() -> None:
     scheduler.add(DNSCollector(), interval_sec=60)
     scheduler.add(WifiCollector(), interval_sec=120)
     scheduler.add(RouteCollector(), interval_sec=300)
+    scheduler.add_analyzer(LatencySpikeAnalyzer(), interval_sec=30)
 
     log.info("collectors registered, entering run loop (Ctrl+C to stop)")
     scheduler.run_forever()

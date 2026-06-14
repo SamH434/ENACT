@@ -15,3 +15,14 @@ collectors -> storage.samples -> analyzers -> storage.events -> dashboard
 
 ## Diagram
 TODO: recreate paper plan to ascii or something
+
+## Section below is gathered through long-term testing
+
+## Known behaviors
+
+**Host sleep/wake:** ENACT runs as a normal user process and gets
+suspended when the host sleeps. Long collector cycles (especially
+tracert and ping) can appear in the data as a single multi hour
+"cycle" after resume. The system handles this gracefully but the
+timeline will show a gap. Records produced after wake are stamped
+with the wake time, not the original cycle start.

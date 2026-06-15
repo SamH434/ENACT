@@ -4,6 +4,13 @@ Route change analyzer: detects when the network path to a target shifts.
 Formula:
     compare the most recent route fingerprint for each target against the
     one before it. if they differ, the path changed: fire an event.
+
+The diagnostic value comes from CORRELATION: a
+route change combined with a latency spike or DNS slowdown points
+strongly at an upstream network issue rather than a local one.
+
+Like the other analyzers, when this fires it pulls samples from the
+same time window across ALL collectors so the event explains itself.
 """
 
 import json

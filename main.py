@@ -16,6 +16,8 @@ from src.collectors.dns import DNSCollector
 from src.collectors.route import RouteCollector
 from src.collectors.wifi import WifiCollector
 from src.analyzers.latency_spike import LatencySpikeAnalyzer
+from src.analyzers.dns_outage import DNSOutageAnalyzer
+from src.analyzers.route_change import RouteChangeAnalyzer
 from src.scheduler import Scheduler
 from src.utils.logger import get_logger
 
@@ -34,6 +36,8 @@ def main() -> None:
     scheduler.add(WifiCollector(), interval_sec=120)
     scheduler.add(RouteCollector(), interval_sec=300)
     scheduler.add_analyzer(LatencySpikeAnalyzer(), interval_sec=30)
+    scheduler.add_analyzer(DNSOutageAnalyzer(), interval_sec=30)
+    scheduler.add_analyzer(RouteChangeAnalyzer(), interval_sec=60)
 
     log.info("collectors registered, entering run loop (Ctrl+C to stop)")
     scheduler.run_forever()

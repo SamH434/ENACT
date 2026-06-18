@@ -3,3 +3,4 @@ pandas>=2.0
 matplotlib>=3.7
 rich>=13.0
 flask>=3.0
+pywebview>=5.0

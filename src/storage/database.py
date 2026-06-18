@@ -202,6 +202,74 @@ def recent_events(limit: int = 100) -> list[sqlite3.Row]:
         )
         return cur.fetchall()
 
+# fetches the most recent successful cycle's timing/status for each collector
+def latest_run_per_collector() -> list[sqlite3.Row]:
+    """One row per collector: most recent cycle's ts, status, duration, sample_count."""
+    with _connect() as conn:
+        # this CTE picks the highest id per collector in the runs table.
+        # last id = most recent insertion, which is what we want for "last cycle"
+        cur = conn.execute(
+            """
+            WITH latest AS (
+                SELECT collector, MAX(id) AS max_id
+                FROM runs
+                GROUP BY collector
+            )
+            SELECT r.*
+            FROM runs r
+            JOIN latest l ON r.id = l.max_id
+            ORDER BY r.collector
+            """
+        )
+        return cur.fetchall()
+
+
+# fetches the most recent value of each (collector, metric) combination
+def latest_metric_snapshots() -> list[sqlite3.Row]:
+    """The newest sample for each unique (collector, metric) pair."""
+    with _connect() as conn:
+        cur = conn.execute(
+            """
+            WITH ranked AS (
+                SELECT *,
+                       ROW_NUMBER() OVER (PARTITION BY collector, metric
+                                          ORDER BY ts DESC) AS rn
+                FROM samples
+            )
+            SELECT * FROM ranked WHERE rn = 1
+            ORDER BY collector, metric
+            """
+        )
+        return cur.fetchall()
+
+
+# fetches latency samples over the last N minutes for one target, oldest first
+# used by the sparkline so the time axis flows left to right naturally
+def latency_history(target: str, minutes: int = 60) -> list[float]:
+    """Latency values for one target over the last N minutes, oldest first."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
+    with _connect() as conn:
+        cur = conn.execute(
+            """
+            SELECT value, meta_json
+            FROM samples
+            WHERE collector = 'connectivity'
+              AND metric = 'latency_ms'
+              AND value IS NOT NULL
+              AND ts >= ?
+            ORDER BY ts ASC
+            """,
+            (cutoff,),
+        )
+        # filter by target inside python since target lives in JSON metadata
+        rows = cur.fetchall()
+        values: list[float] = []
+        for r in rows:
+            meta = json.loads(r["meta_json"]) if r["meta_json"] else {}
+            if meta.get("target") == target:
+                values.append(r["value"])
+        return values
+        
 # deletes samples and runs older than the retention window to keep the DB small
 def prune_old_data(retention_days: int) -> int:
     """Delete samples/runs older than retention_days. Returns rows deleted."""

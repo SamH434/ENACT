@@ -269,7 +269,59 @@ def latency_history(target: str, minutes: int = 60) -> list[float]:
             if meta.get("target") == target:
                 values.append(r["value"])
         return values
-        
+
+# fetches latency samples per target over the last N minutes
+# used by the live oscilloscope chart for multi-target display
+def latency_history_multi(targets: list[str], minutes: int = 30
+                           ) -> dict[str, list[tuple[str, float]]]:
+    """Per-target latency history as {target: [(iso_ts, value), ...]} oldest first."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
+    with _connect() as conn:
+        cur = conn.execute(
+            """
+            SELECT ts, value, meta_json
+            FROM samples
+            WHERE collector = 'connectivity'
+              AND metric = 'latency_ms'
+              AND value IS NOT NULL
+              AND ts >= ?
+            ORDER BY ts ASC
+            """,
+            (cutoff,),
+        )
+        rows = cur.fetchall()
+    # partition by target. each target gets a list of (timestamp, value) pairs
+    out: dict[str, list[tuple[str, float]]] = {t: [] for t in targets}
+    for r in rows:
+        meta = json.loads(r["meta_json"]) if r["meta_json"] else {}
+        target = meta.get("target")
+        if target in out:
+            out[target].append((r["ts"], r["value"]))
+    return out
+
+# fetches recent events with severity for the dashboard event log
+def recent_events_compact(limit: int = 15) -> list[dict]:
+    """Recent events as plain dicts, ready for JSON. Newest first."""
+    rows = recent_events(limit=limit)
+    return [
+        {
+            "ts": r["ts"],
+            "type": r["type"],
+            "severity": r["severity"],
+            "summary": r["summary"],
+        }
+        for r in rows
+    ]
+
+# fetches all the data the dashboard tables need, in one round trip
+def dashboard_snapshot() -> dict:
+    """One-shot fetch of everything the dashboard tables display."""
+    return {
+        "collector_health": [dict(r) for r in latest_run_per_collector()],
+        "current_metrics": [dict(r) for r in latest_metric_snapshots()],
+        "events": recent_events_compact(limit=15),
+    }
+
 # deletes samples and runs older than the retention window to keep the DB small
 def prune_old_data(retention_days: int) -> int:
     """Delete samples/runs older than retention_days. Returns rows deleted."""

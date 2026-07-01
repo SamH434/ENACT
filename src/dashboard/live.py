@@ -177,8 +177,8 @@ def _header_panel(critical_active: bool) -> Panel:
         border = COLOR_RED
     else:
         title = Text()
-        title.append("  [ ENACT ]  ", style=f"bold {COLOR_BG_BLACK} on {COLOR_AMBER_BRIGHT}")
-        title.append("  NETWORK RESILIENCE TELEMETRY  ", style=f"bold {COLOR_AMBER}")
+        #title.append("  [ ENACT ]  ", style=f"bold {COLOR_BG_BLACK} on {COLOR_AMBER_BRIGHT}")
+        title.append("  [ ENGINE FOR NETWORK ANOMALY, CONDITION, AND TELEMETRY ]  ", style=f"bold {COLOR_AMBER}")
         title.append(f"  {date}  ", style=COLOR_CYAN)
         border = COLOR_AMBER
 
@@ -365,66 +365,6 @@ def _events_panel(critical_active: bool) -> Panel:
         box=box.HEAVY,
     )
 
-
-# builds the latency trace panel
-def _sparkline_panel() -> Panel:
-    values = database.latency_history(LATENCY_TARGET, minutes=60)
-    if not values:
-        body = Text("(no latency data for this target yet)", style=COLOR_CYAN_DIM)
-        return Panel(
-            body,
-            title=f"[ LATENCY TRACE · TARGET {LATENCY_TARGET} · LAST 60MIN ]",
-            title_align="left",
-            border_style=COLOR_AMBER,
-            box=box.HEAVY,
-        )
-
-    chart_width = 45
-    chart_height = 6
-    chart_rows = _bar_chart(values, width=chart_width, height=chart_height)
-    tick_axis = "└" + ("─" * 8 + "┬") * 4 + "─" * 10 + "┘" 
-
-    # render as an inner table so rich handles alignment cleanly.
-    # left column: scale labels (max, then blank rows, then min).
-    # right column: chart rows, then axis, then stats.
-    inner = Table(box=None, show_header=False, expand=True, padding=(0, 1))
-    inner.add_column(justify="right", style=COLOR_CYAN_DIM, no_wrap=True, width=8)
-    inner.add_column(justify="left", no_wrap=True)
-
-    # first chart row gets the max label, last gets the min, middle rows blank
-    for i, row in enumerate(chart_rows):
-        if i == 0:
-            label = Text(f"{max(values):.0f}ms", style=COLOR_CYAN_DIM)
-        elif i == chart_height - 1:
-            label = Text(f"{min(values):.0f}ms", style=COLOR_CYAN_DIM)
-        else:
-            label = Text("")
-        inner.add_row(label, Text(row, style=f"bold {COLOR_AMBER_BRIGHT}"))
-
-    # axis + axis labels + stats
-    inner.add_row(Text(""), Text(tick_axis, style=COLOR_CYAN_DIM))
-    inner.add_row(
-        Text(""),
-        Text("-60min" + " " * 35 + "now", style=COLOR_CYAN_DIM),
-    )
-    inner.add_row(
-        Text(""),
-        Text(
-            f"MIN {min(values):.0f}ms  ·  "
-            f"AVG {sum(values) / len(values):.0f}ms  ·  "
-            f"MAX {max(values):.0f}ms  ·  "
-            f"N={len(values)}",
-            style=f"bold {COLOR_AMBER}",
-        ),
-    )
-
-    return Panel(
-        inner,
-        title=f"[ LATENCY TRACE · TARGET {LATENCY_TARGET} · LAST 60MIN ]",
-        title_align="left",
-        border_style=COLOR_AMBER,
-        box=box.HEAVY,
-    )
 
 # composes the full layout for one render frame
 def _build_layout() -> Layout:

@@ -52,7 +52,6 @@ TRACE_LABELS = {
     "9.9.9.9": "Quad9 · 9.9.9.9",
 }
 
-
 """
 JavaScript-callable API exposed to the embedded browser.
 

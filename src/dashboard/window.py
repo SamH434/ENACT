@@ -13,6 +13,8 @@ Run with:
 """
 
 import json
+import subprocess
+import sys
 import webview
 
 from src.storage import database
@@ -71,6 +73,29 @@ class DashboardAPI:
             target: [{"x": ts, "y": val} for ts, val in points]
             for target, points in raw.items()
         }
+
+    # polled by the main dashboard's alarm watcher, returns any new critical
+    # events since the last known id. the client tracks the watermark itself
+    def get_new_criticals(self, since_id: int) -> list[dict]:
+        return database.new_critical_events_since(since_id)
+
+    # spawns the incident window as its own subprocess so it lives on its own
+    # event loop, independent of this dashboard. returns True on launch, False
+    # on failure. failure is not fatal for the main dashboard
+    def launch_incident_window(self, event_id: int) -> bool:
+        try:
+            # use the same Python interpreter that's running this dashboard
+            subprocess.Popen(
+                [sys.executable, "-m", "src.dashboard.incident", str(event_id)],
+                # detach on Windows so the child survives if we close later
+                creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP
+                              if sys.platform == "win32" else 0),
+            )
+            return True
+        except Exception as e:
+            print(f"[ENACT] failed to launch incident window: {e}")
+            return False
+
 
 
 # the static HTML/CSS/JS that drives the dashboard. python only provides data,
@@ -330,6 +355,71 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     color: var(--cyan);
     letter-spacing: 1px;
 }
+
+/* alarm overlay: full-window red flash on critical events, then fades out */
+#alarm-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(180, 0, 0, 0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    pointer-events: none;
+    animation: alarm-flash 2.5s ease-out forwards;
+}
+#alarm-overlay.hidden { display: none; }
+@keyframes alarm-flash {
+    0%    { background: rgba(255, 0, 0, 0.0); }
+    5%    { background: rgba(255, 30, 30, 0.85); }
+    15%   { background: rgba(180, 0, 0, 0.60); }
+    25%   { background: rgba(255, 30, 30, 0.85); }
+    35%   { background: rgba(180, 0, 0, 0.60); }
+    50%   { background: rgba(255, 30, 30, 0.75); }
+    85%   { background: rgba(180, 0, 0, 0.50); }
+    100%  { background: rgba(180, 0, 0, 0.0); }
+}
+.alarm-content {
+    text-align: center;
+    color: white;
+    text-shadow: 0 0 20px black, 0 0 40px rgba(255, 0, 0, 0.8);
+    padding: 40px 80px;
+    border: 6px solid white;
+    background: rgba(0, 0, 0, 0);
+}
+@keyframes alarm-shake {
+    0%, 100% { transform: translate(0, 0); }
+    25%      { transform: translate(-3px, 2px); }
+    50%      { transform: translate(2px, -2px); }
+    75%      { transform: translate(-2px, -1px); }
+}
+.alarm-title {
+    font-size: 62px;
+    font-weight: bold;
+    letter-spacing: 8px;
+    margin-bottom: 12px;
+    color: #ffdddd;
+}
+.alarm-code {
+    font-size: 20px;
+    letter-spacing: 4px;
+    color: #ffaaaa;
+    margin-bottom: 20px;
+}
+.alarm-summary {
+    font-size: 16px;
+    color: white;
+    max-width: 700px;
+    margin: 0 auto 20px auto;
+    line-height: 1.4;
+}
+.alarm-launch {
+    font-size: 12px;
+    letter-spacing: 3px;
+    color: #ffaaaa;
+    margin-top: 24px;
+}
+
 </style>
 </head>
 <body>
@@ -401,6 +491,20 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
 
     <!-- footer -->
     <div id="footer">PRESS ALT+F4 OR CLOSE WINDOW TO DISENGAGE</div>
+
+    <!-- footer -->
+    <div id="footer">PRESS ALT+F4 OR CLOSE WINDOW TO DISENGAGE</div>
+
+    <!-- alarm overlay: hidden by default, flashes over the whole window on
+         critical events, then fades out and triggers the incident window -->
+    <div id="alarm-overlay" class="hidden">
+        <div class="alarm-content">
+            <div class="alarm-title">⚠ EMERGENCY ⚠</div>
+            <div class="alarm-code">CRITICAL EVENT DETECTED</div>
+            <div class="alarm-summary" id="alarm-overlay-summary"></div>
+            <div class="alarm-launch">LAUNCHING INCIDENT REPORT...</div>
+        </div>
+    </div>
 
 </div>
 
@@ -669,9 +773,72 @@ function bootUiOnly() {
     setTimeout(initChart, 200);
 }
 
+/* watermark for the alarm system: only fire for events strictly newer than this.
+   initialize to -1 so we don't re-alarm for pre-existing critical events on startup,
+   we'll set it to the current max on first poll instead */
+let lastAlarmedId = null;
+let alarmShowing = false;
+
+/* runs on the same cadence as tickSnapshot: if any new critical events exist,
+   flash the alarm and launch the incident window */
+async function tickAlarmWatcher() {
+    try {
+        // on first run, set our watermark to the current highest critical event id
+        // so we don't fire alarms for events that existed before the dashboard opened
+        if (lastAlarmedId === null) {
+            const initial = await window.pywebview.api.get_new_criticals(-1);
+            lastAlarmedId = initial.length > 0
+                ? Math.max(...initial.map(e => e.id))
+                : 0;
+            return;
+        }
+        const news = await window.pywebview.api.get_new_criticals(lastAlarmedId);
+        if (news.length === 0 || alarmShowing) return;
+
+        // alarm on the OLDEST unseen critical, then advance the watermark
+        // past ALL of them. otherwise a burst of criticals would spam alarms
+        const target = news[0];
+        lastAlarmedId = Math.max(...news.map(e => e.id));
+        triggerAlarm(target);
+    } catch (e) {
+        // ignore transient errors
+    }
+}
+
+/* shows the alarm overlay, waits for the flash animation, then launches
+   the incident window and hides the overlay */
+async function triggerAlarm(event) {
+    if (alarmShowing) return;
+    alarmShowing = true;
+
+    const overlay = document.getElementById("alarm-overlay");
+    document.getElementById("alarm-overlay-summary").textContent =
+        `${event.type.toUpperCase()} · ${event.summary}`;
+    overlay.classList.remove("hidden");
+    // restart the CSS animation by re-triggering it
+    overlay.style.animation = "none";
+    void overlay.offsetWidth;  // force reflow
+    overlay.style.animation = "";
+
+    // launch the incident window mid-flash so it appears just as the flash ends
+    setTimeout(() => {
+        window.pywebview.api.launch_incident_window(event.id);
+    }, 1500);
+
+    // hide the overlay after animation completes
+    setTimeout(() => {
+        overlay.classList.add("hidden");
+        alarmShowing = false;
+    }, 2500);
+}
+
 function bootPolling() {
     tickSnapshot();
     setInterval(tickSnapshot, REFRESH_MS);
+
+    // alarm watcher runs on its own timer, polling for new critical events
+    tickAlarmWatcher();
+    setInterval(tickAlarmWatcher, 2000);  // 2s cadence is plenty
 }
 
 /* run the pure-UI boot as soon as the DOM is parsed */

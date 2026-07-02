@@ -322,6 +322,64 @@ def dashboard_snapshot() -> dict:
         "events": recent_events_compact(limit=15),
     }
 
+# fetches one specific event by its auto-incremented id
+def event_by_id(event_id: int) -> sqlite3.Row | None:
+    """Retrieve a single event by primary key, or None if not found."""
+    with _connect() as conn:
+        cur = conn.execute(
+            "SELECT * FROM events WHERE id = ?",
+            (event_id,),
+        )
+        return cur.fetchone()
+
+
+# fetches new critical events with id > watermark, used by the alarm to
+# detect events we haven't yet shown a popup for
+def new_critical_events_since(last_seen_id: int) -> list[dict]:
+    """Critical events newer than last_seen_id, oldest first."""
+    with _connect() as conn:
+        cur = conn.execute(
+            """
+            SELECT * FROM events
+            WHERE severity = 'critical' AND id > ?
+            ORDER BY id ASC
+            """,
+            (last_seen_id,),
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+
+# fetches the samples that are relevant to a given event: the same collector
+# types that already appear in the event's evidence, over the specified window
+def samples_around_event(event_id: int, seconds_before: int = 60,
+                         seconds_after: int = 120) -> dict:
+    """Recent samples grouped by collector, spanning around one event's timestamp.
+
+    Used by the incident window to show a live picture of what's happening
+    during and after the anomaly. The 'after' window is longer than 'before'
+    because we care most about recovery.
+    """
+    event = event_by_id(event_id)
+    if event is None:
+        return {}
+    event_ts = datetime.fromisoformat(event["ts"])
+    window_start = event_ts - timedelta(seconds=seconds_before)
+    window_end = datetime.now(timezone.utc)  # "now" so the window grows live
+    if window_end > event_ts + timedelta(seconds=seconds_after):
+        window_end = event_ts + timedelta(seconds=seconds_after)
+
+    rows = samples_in_window(window_start, window_end)
+    grouped: dict[str, list[dict]] = {}
+    for r in rows:
+        meta = json.loads(r["meta_json"]) if r["meta_json"] else {}
+        grouped.setdefault(r["collector"], []).append({
+            "ts": r["ts"],
+            "metric": r["metric"],
+            "value": r["value"] if r["value"] is not None else r["value_str"],
+            "meta": meta,
+        })
+    return grouped
+    
 # deletes samples and runs older than the retention window to keep the DB small
 def prune_old_data(retention_days: int) -> int:
     """Delete samples/runs older than retention_days. Returns rows deleted."""

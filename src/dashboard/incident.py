@@ -204,9 +204,19 @@ html, body {
     border-bottom: 1px solid rgba(255, 48, 48, 0.08);
     align-items: baseline;
 }
+
+.kv-list li.nested {
+    padding-left: 8px;
+    border-bottom: 1px solid rgba(255, 48, 48, 0.03);
+}
+.kv-list li.nested .k { color: var(--cyan-dim); font-weight: normal; font-size: 10px; }
+.kv-list li.nested .v { font-weight: normal; font-size: 12px; }
+
 .kv-list .k { color: var(--text-mute); font-size: 11px; letter-spacing: 0.5px; }
 .kv-list .v { color: var(--amber-bright); font-weight: bold; }
 .kv-list .v.hot { color: var(--red-bright); }
+
+
 
 /* recent samples table: chronological live view */
 .scroll-area {
@@ -510,20 +520,64 @@ function renderStatus(eventType, samples) {
     `).join("");
 }
 
-/* renders the evidence key-value list from the event's evidence_json */
+/* renders the evidence key-value list. objects like per_hostname get expanded
+   into nested rows instead of dumped as JSON, otherwise they're unreadable */
 function renderEvidence(evidence) {
     const list = document.getElementById("evidence-list");
-    // pull the top-level, non-nested keys of the evidence dict as headline data.
-    // deeply-nested stuff (like concurrent_samples) shows up in the samples panel
     const items = [];
     for (const [k, v] of Object.entries(evidence)) {
-        if (k === "concurrent_samples") continue;  // shown in samples panel instead
+        if (k === "concurrent_samples") continue;
         if (v === null || v === undefined) continue;
-        // pretty-print objects/arrays as compact JSON for readability
-        const display = (typeof v === "object")
-            ? JSON.stringify(v)
-            : String(v);
-        // mark critical-looking values as "hot": rates near 1.0, high multipliers, etc.
+
+        // special case: per-hostname dict gets expanded into readable rows
+        if (k === "per_hostname" && typeof v === "object" && !Array.isArray(v)) {
+            items.push(`<li>
+                <span class="k">${escapeHtml(k.toUpperCase())}</span>
+                <span class="v"></span>
+            </li>`);
+            for (const [host, stats] of Object.entries(v)) {
+                const success = stats.success || 0;
+                const failure = stats.failure || 0;
+                const isHot = failure > success;
+                items.push(`<li class="nested">
+                    <span class="k">&nbsp;&nbsp;${escapeHtml(host)}</span>
+                    <span class="v ${isHot ? 'hot' : ''}">
+                        ${success} ok · ${failure} fail
+                    </span>
+                </li>`);
+            }
+            continue;
+        }
+
+        // hop lists get shown as arrow-separated hops
+        if ((k === "old_hops" || k === "new_hops") && Array.isArray(v)) {
+            items.push(`<li>
+                <span class="k">${escapeHtml(k.toUpperCase())}</span>
+                <span class="v">${escapeHtml(v.join(" → "))}</span>
+            </li>`);
+            continue;
+        }
+
+        // window_start / window_end: strip the microseconds and timezone for readability
+        if (k === "window_start" || k === "window_end") {
+            const clean = String(v).split(".")[0].replace("T", " ");
+            items.push(`<li>
+                <span class="k">${escapeHtml(k.toUpperCase())}</span>
+                <span class="v">${escapeHtml(clean)}</span>
+            </li>`);
+            continue;
+        }
+
+        // numeric floats: round to 2 places for readability
+        let display;
+        if (typeof v === "number") {
+            display = Number.isInteger(v) ? String(v) : v.toFixed(2);
+        } else if (typeof v === "object") {
+            display = JSON.stringify(v);
+        } else {
+            display = String(v);
+        }
+
         const isHot = (k.includes("rate") && typeof v === "number" && v >= 0.5)
                    || (k === "multiplier_observed" && typeof v === "number" && v >= 3)
                    || (k === "drop_db" && typeof v === "number" && v >= 15);

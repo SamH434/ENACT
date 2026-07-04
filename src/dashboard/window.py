@@ -491,9 +491,6 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     <!-- footer -->
     <div id="footer">PRESS ALT+F4 OR CLOSE WINDOW TO DISENGAGE</div>
 
-    <!-- footer -->
-    <div id="footer">PRESS ALT+F4 OR CLOSE WINDOW TO DISENGAGE</div>
-
     <!-- alarm overlay: hidden by default, flashes over the whole window on
          critical events, then fades out and triggers the incident window -->
     <div id="alarm-overlay" class="hidden">

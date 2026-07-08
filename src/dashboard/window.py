@@ -159,7 +159,7 @@ html, body {
 #body {
     display: grid;
     grid-template-rows: 1fr 1fr;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 220px 1fr 1fr;
     gap: 8px;
     min-height: 0;
 }
@@ -345,6 +345,73 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
 .scroll-area::-webkit-scrollbar { width: 6px; }
 .scroll-area::-webkit-scrollbar-thumb { background: var(--cyan-mute); }
 
+/* connectivity status column: three vertical status boxes on the left of the
+   body grid. spans both rows of the 2x2 to its right, so it's a tall column
+   containing three roughly-equal-height status boxes stacked vertically */
+#status-strip {
+    grid-row: 1 / -1;              /* span all rows of #body */
+    display: grid;
+    grid-template-rows: 1fr 1fr 1fr;
+    gap: 12px;
+    padding: 18px 12px 12px;
+    border: 2px solid var(--amber);
+    background: var(--bg-panel);
+    position: relative;
+    min-height: 0;
+}
+.status-box {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 8px 14px;
+    border: 2px solid var(--cyan-dim);
+    background: rgba(0, 175, 255, 0.03);
+    transition: border-color 0.3s ease, background 0.3s ease;
+}
+.status-box .label {
+    color: var(--text-mute);
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    font-weight: bold;
+    margin-bottom: 4px;
+}
+.status-box .value {
+    font-size: 20px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    color: var(--amber-bright);
+    line-height: 1.1;
+}
+.status-box .sub {
+    color: var(--text-mute);
+    font-size: 11px;
+    margin-top: 4px;
+    letter-spacing: 0.5px;
+}
+
+.status-box.ok {
+    border-color: var(--green-dim);
+    background: rgba(95, 207, 95, 0.04);
+}
+.status-box.ok .value { color: var(--green-dim); }
+
+.status-box.degraded {
+    border-color: var(--yellow);
+    background: rgba(255, 215, 0, 0.06);
+}
+.status-box.degraded .value { color: var(--yellow); }
+
+.status-box.bad {
+    border-color: var(--red);
+    background: rgba(255, 48, 48, 0.06);
+}
+.status-box.bad .value { color: var(--red); }
+
+.status-box.na {
+    border-color: var(--cyan-dim);
+}
+.status-box.na .value { color: var(--cyan-dim); font-size: 16px; }
+
 /* initial loading state, replaced after first poll */
 .loading {
     display: flex;
@@ -438,8 +505,28 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
         </div>
     </div>
 
-    <!-- body: 2x2 panel grid -->
+    <!-- body grid: status column on the left, 2x2 panels on the right -->
     <div id="body">
+
+        <!-- connectivity status: three stacked boxes spanning both rows -->
+        <div id="status-strip">
+            <span class="panel-title">[ STATUS ]</span>
+            <div class="status-box na" id="status-wifi">
+                <div class="label">WI-FI</div>
+                <div class="value">—</div>
+                <div class="sub">initializing</div>
+            </div>
+            <div class="status-box na" id="status-internet">
+                <div class="label">INTERNET</div>
+                <div class="value">—</div>
+                <div class="sub">initializing</div>
+            </div>
+            <div class="status-box na" id="status-vpn">
+                <div class="label">VPN</div>
+                <div class="value">—</div>
+                <div class="sub">initializing</div>
+            </div>
+        </div>
 
         <!-- top-left: collector health -->
         <div class="panel">
@@ -532,7 +619,12 @@ function formatValue(v) {
     return String(v);
 }
 
-/* update the live clock (HH:MM:SS.mmm) and the date in the header */
+/* short day and month abbreviations for the header date. arrays are indexed by
+   getDay() and getMonth() return values, keeps the format compact and readable */
+const DAY_ABBR = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
 function tickClock() {
     const now = new Date();
     const h = String(now.getHours()).padStart(2, "0");
@@ -542,10 +634,12 @@ function tickClock() {
     document.getElementById("clock-time").textContent = `${h}:${m}:${s}`;
     document.getElementById("clock-ms").textContent = `.${ms}`;
 
-    const y = now.getFullYear();
-    const mo = String(now.getMonth() + 1).padStart(2, "0");
-    const d = String(now.getDate()).padStart(2, "0");
-    document.getElementById("header-date").textContent = `${y}.${mo}.${d}`;
+    // format: "Tue, Jul. 7" — day abbr + comma + month abbr + period + day-of-month
+    const dayName = DAY_ABBR[now.getDay()];
+    const monthName = MONTH_ABBR[now.getMonth()];
+    const dayOfMonth = now.getDate();
+    document.getElementById("header-date").textContent =
+        `${dayName}, ${monthName}. ${dayOfMonth}`;
 }
 
 /* render the collector health table from snapshot data */
@@ -638,6 +732,73 @@ function renderEvents(rows) {
     }).join("");
 }
 
+/* renders the three status boxes at the top of the dashboard.
+   maps each status metric's value to a color-coded box: ok = green,
+   degraded = yellow, down/disconnected = red, none = cyan-dim */
+function renderStatus(status) {
+    if (!status) return;
+
+    // wi-fi
+    const wifi = status.wifi_status;
+    const wifiBox = document.getElementById("status-wifi");
+    if (wifi) {
+        if (wifi.value === "connected") {
+            const ssid = wifi.meta.ssid || "?";
+            wifiBox.className = "status-box ok";
+            wifiBox.querySelector(".value").textContent = "CONNECTED";
+            wifiBox.querySelector(".sub").textContent = `SSID: ${ssid}`;
+        } else if (wifi.value === "disconnected") {
+            wifiBox.className = "status-box bad";
+            wifiBox.querySelector(".value").textContent = "DISCONNECTED";
+            wifiBox.querySelector(".sub").textContent = "no association";
+        } else {
+            wifiBox.className = "status-box na";
+            wifiBox.querySelector(".value").textContent = "UNKNOWN";
+            wifiBox.querySelector(".sub").textContent = wifi.value || "unavailable";
+        }
+    }
+
+    // internet: four possible states, each honest about what's actually broken
+    const inet = status.internet_status;
+    const inetBox = document.getElementById("status-internet");
+    if (inet) {
+        const map = {
+            "ok":       { cls: "ok",       label: "ONLINE",   sub: "DNS + ping ok" },
+            "degraded": { cls: "degraded", label: "DEGRADED", sub: "ICMP blocked (DNS ok)" },
+            "no_dns":   { cls: "degraded", label: "NO DNS",   sub: "IP reachable, DNS broken" },
+            "down":     { cls: "bad",      label: "OFFLINE",  sub: "no DNS, no route" },
+        };
+        const info = map[inet.value] || { cls: "na", label: "UNKNOWN", sub: inet.value };
+        inetBox.className = `status-box ${info.cls}`;
+        inetBox.querySelector(".value").textContent = info.label;
+        inetBox.querySelector(".sub").textContent = info.sub;
+    }
+
+    // vpn: connected or not. we deliberately don't try to identify the vendor
+    const vpn = status.vpn_status;
+    const vpnBox = document.getElementById("status-vpn");
+    if (vpn) {
+        if (vpn.value === "connected") {
+            vpnBox.className = "status-box ok";
+            vpnBox.querySelector(".value").textContent = "TUNNELED";
+            const count = vpn.meta.count || 1;
+            const first = (vpn.meta.adapters || [])[0];
+            const detail = first
+                ? `${count} adapter${count > 1 ? 's' : ''} · ${first.name}`
+                : `${count} active adapter${count > 1 ? 's' : ''}`;
+            vpnBox.querySelector(".sub").textContent = detail;
+        } else if (vpn.value === "none") {
+            vpnBox.className = "status-box na";
+            vpnBox.querySelector(".value").textContent = "NOT ACTIVE";
+            vpnBox.querySelector(".sub").textContent = "no tunnel detected";
+        } else {
+            vpnBox.className = "status-box na";
+            vpnBox.querySelector(".value").textContent = "UNKNOWN";
+            vpnBox.querySelector(".sub").textContent = vpn.value || "unavailable";
+        }
+    }
+}
+
 /* minimal HTML escaping for dynamic content. summaries can contain anything */
 function escapeHtml(s) {
     if (s === null || s === undefined) return "";
@@ -650,6 +811,7 @@ function escapeHtml(s) {
 async function tickSnapshot() {
     try {
         const snap = await window.pywebview.api.get_snapshot();
+        renderStatus(snap.status);
         renderHealth(snap.collector_health);
         renderMetrics(snap.current_metrics);
         renderEvents(snap.events);
@@ -715,6 +877,11 @@ function initChart() {
                 },
                 y: {
                     beginAtZero: true,
+                    // hard cap the axis so a single weird sample can't compress the
+                    // whole chart to look flat. 200ms is well above healthy internet
+                    // latency; anything higher genuinely IS an anomaly and shows as
+                    // a clipped spike, which is the right visual signal
+                    suggestedMax: 200,
                     grid: { color: "rgba(0, 175, 255, 0.10)" },
                     ticks: {
                         color: "#5a7e8a",

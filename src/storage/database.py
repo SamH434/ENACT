@@ -223,6 +223,34 @@ def latest_run_per_collector() -> list[sqlite3.Row]:
         )
         return cur.fetchall()
 
+# fetches the three status readouts as a single dict, ready for the dashboard.
+# the status collector produces these once per cycle and we want the newest
+# of each, this helper keeps the dashboard code simple
+def status_snapshot() -> dict:
+    """Most recent status readouts (wifi, internet, vpn) as a plain dict."""
+    with _connect() as conn:
+        cur = conn.execute(
+            """
+            WITH ranked AS (
+                SELECT *,
+                       ROW_NUMBER() OVER (PARTITION BY metric
+                                          ORDER BY ts DESC) AS rn
+                FROM samples
+                WHERE collector = 'status'
+            )
+            SELECT * FROM ranked WHERE rn = 1
+            """
+        )
+        rows = cur.fetchall()
+    out = {}
+    for r in rows:
+        meta = json.loads(r["meta_json"]) if r["meta_json"] else {}
+        out[r["metric"]] = {
+            "value": r["value_str"],
+            "ts": r["ts"],
+            "meta": meta,
+        }
+    return out
 
 # fetches the most recent value of each (collector, metric) combination
 def latest_metric_snapshots() -> list[sqlite3.Row]:
@@ -320,6 +348,7 @@ def dashboard_snapshot() -> dict:
         "collector_health": [dict(r) for r in latest_run_per_collector()],
         "current_metrics": [dict(r) for r in latest_metric_snapshots()],
         "events": recent_events_compact(limit=15),
+        "status": status_snapshot(),
     }
 
 # fetches one specific event by its auto-incremented id

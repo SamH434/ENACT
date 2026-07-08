@@ -21,6 +21,7 @@ from src.analyzers.route_change import RouteChangeAnalyzer
 from src.analyzers.wifi_degradation import WifiDegradationAnalyzer
 from src.scheduler import Scheduler
 from src.utils.logger import get_logger
+from src.collectors.status import StatusCollector
 
 
 log = get_logger("enact.main")
@@ -40,6 +41,7 @@ def main() -> None:
     scheduler.add_analyzer(DNSOutageAnalyzer(), interval_sec=30)
     scheduler.add_analyzer(RouteChangeAnalyzer(), interval_sec=60)
     scheduler.add_analyzer(WifiDegradationAnalyzer(), interval_sec=60)
+    scheduler.add(StatusCollector(), interval_sec=15)
 
     log.info("collectors registered, entering run loop (Ctrl+C to stop)")
     scheduler.run_forever()

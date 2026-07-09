@@ -336,6 +336,54 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     height: 100%;
 }
 
+/* full-panel overlay shown when the chart has no data to draw. sits on top of
+   the (correctly empty) canvas and explains WHY no lines are visible, which is
+   more useful than a silent black rectangle */
+#chart-nodata {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    background: rgba(0, 0, 0, 0.55);
+    pointer-events: none;
+    z-index: 5;
+    letter-spacing: 3px;
+}
+#chart-nodata.hidden { display: none; }
+#chart-nodata .headline {
+    color: var(--red);
+    font-weight: bold;
+    font-size: 42px;
+    letter-spacing: 6px;
+    text-shadow: 0 0 12px rgba(255, 48, 48, 0.4);
+    margin-bottom: 12px;
+}
+#chart-nodata .reason-label {
+    color: var(--text-mute);
+    font-size: 10px;
+    letter-spacing: 3px;
+    margin-bottom: 4px;
+}
+#chart-nodata .reason {
+    color: var(--red-bright, #ff5050);
+    font-size: 16px;
+    font-weight: bold;
+    letter-spacing: 2px;
+}
+
+/* variant: initializing (softer, cyan not red) — for the first few seconds
+   after the dashboard opens, before we can classify state honestly */
+#chart-nodata.initializing .headline {
+    color: var(--cyan);
+    text-shadow: 0 0 12px rgba(0, 175, 255, 0.4);
+    font-size: 28px;
+    letter-spacing: 4px;
+}
+#chart-nodata.initializing .reason { color: var(--cyan-dim); }
+
 /* event log scrolls if too tall, with subtle scrollbar styling */
 .scroll-area {
     flex: 1;
@@ -570,6 +618,13 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
             <span class="panel-title">[ LATENCY TRACE · LIVE OSCILLOSCOPE ]</span>
             <div id="chart-canvas-wrap">
                 <canvas id="chart-canvas"></canvas>
+                <!-- overlay: shown only when chart has no data to draw.
+                     honest labels beat silent empty panels -->
+                <div id="chart-nodata" class="initializing">
+                    <div class="headline" id="chart-nodata-headline">INITIALIZING</div>
+                    <div class="reason-label">STATUS</div>
+                    <div class="reason" id="chart-nodata-reason">stabilizing...</div>
+                </div>
             </div>
         </div>
 
@@ -799,6 +854,85 @@ function renderStatus(status) {
     }
 }
 
+/* classifies the chart's data state and updates the overlay label accordingly.
+   called on every snapshot tick so it reacts quickly to state changes.
+   states (in priority order):
+     - engine_offline: no collector cycles happening at all
+     - stale_data:     last successful latency was too long ago
+     - no_latency:     samples flowing but zero successful latencies (ICMP block etc.)
+     - initializing:   dashboard just opened, waiting for first data
+     - ok:             data is fresh, hide the overlay
+*/
+function classifyChartState(snapshot) {
+    const overlay = document.getElementById("chart-nodata");
+    const headline = document.getElementById("chart-nodata-headline");
+    const reason = document.getElementById("chart-nodata-reason");
+
+    // find the most recent connectivity latency reading in the snapshot metrics
+    let latencyMetric = null;
+    let packetLossMetric = null;
+    for (const m of (snapshot.current_metrics || [])) {
+        if (m.collector === "connectivity" && m.metric === "latency_ms") latencyMetric = m;
+        if (m.collector === "connectivity" && m.metric === "packet_loss_pct") packetLossMetric = m;
+    }
+
+    // has any connectivity cycle happened recently? check collector_health
+    let connectivityHealth = null;
+    for (const h of (snapshot.collector_health || [])) {
+        if (h.collector === "connectivity") connectivityHealth = h;
+    }
+    const connectivityCycled = connectivityHealth !== null;
+    const connectivityAgeSec = connectivityHealth
+        ? (Date.now() - new Date(connectivityHealth.ts).getTime()) / 1000
+        : Infinity;
+
+    // no connectivity collector runs = engine is dead or hasn't started
+    if (!connectivityCycled) {
+        overlay.className = "";
+        headline.textContent = "NO DATA";
+        reason.textContent = "ENGINE OFFLINE";
+        return;
+    }
+
+    // connectivity is cycling but the last cycle was ages ago = something wrong
+    if (connectivityAgeSec > 120) {
+        overlay.className = "";
+        headline.textContent = "NO DATA";
+        reason.textContent = "STALE · " + Math.floor(connectivityAgeSec / 60) + "M AGO";
+        return;
+    }
+
+    // cycles are happening. is there any successful latency reading?
+    // "successful" means value is a real number (not null, since ping failures
+    // produce null latency), AND the reading is fresh (less than 90s old)
+    const latencyAgeSec = latencyMetric
+        ? (Date.now() - new Date(latencyMetric.ts).getTime()) / 1000
+        : Infinity;
+    const latencyIsFresh = latencyMetric
+        && latencyMetric.value !== null
+        && latencyMetric.value !== undefined
+        && latencyAgeSec < 90;
+
+    if (!latencyIsFresh) {
+        // pings are cycling but not succeeding. classify by symptom.
+        const lossHigh = packetLossMetric && packetLossMetric.value >= 90;
+        overlay.className = "";
+        headline.textContent = "NO DATA";
+        if (lossHigh) {
+            // 100% packet loss with cycles still happening = ICMP blocked, or
+            // a total outage. we can't distinguish from packet loss alone, so
+            // give the honest ambiguous answer
+            reason.textContent = "ICMP BLOCKED OR UNREACHABLE";
+        } else {
+            reason.textContent = "NO SUCCESSFUL LATENCY";
+        }
+        return;
+    }
+
+    // real fresh data exists, hide the overlay
+    overlay.classList.add("hidden");
+}
+
 /* minimal HTML escaping for dynamic content. summaries can contain anything */
 function escapeHtml(s) {
     if (s === null || s === undefined) return "";
@@ -815,6 +949,7 @@ async function tickSnapshot() {
         renderHealth(snap.collector_health);
         renderMetrics(snap.current_metrics);
         renderEvents(snap.events);
+        classifyChartState(snap);
     } catch (e) {
         // pywebview bridge not ready yet, retry next tick
     }

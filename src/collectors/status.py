@@ -138,15 +138,23 @@ class StatusCollector(Collector):
         vpn_adapters = []
         for adapter in adapters:
             name_lower = adapter["name"].lower()
-            # skip physical adapters
+            desc_lower = (adapter.get("description") or "").lower()
+            # combined match string: check both the section header name AND the
+            # description field, because vendor identity often lives in Description
+            haystack = f"{name_lower} {desc_lower}"
+
+            # skip if it looks like a physical adapter (Wi-Fi, Ethernet, Bluetooth).
+            # we check name only, not description, because a real Wi-Fi adapter's
+            # Description could contain a VPN vendor's software name in some setups
             if any(hint in name_lower for hint in PHYSICAL_ADAPTER_HINTS):
                 continue
-            # match against known VPN adapter naming patterns
-            if any(hint in name_lower for hint in VPN_ADAPTER_HINTS):
-                # only count if the adapter is actually up with an IP
+
+            # match against VPN adapter hints in the combined name+description
+            if any(hint in haystack for hint in VPN_ADAPTER_HINTS):
                 if adapter["ipv4"]:
                     vpn_adapters.append({
                         "name": adapter["name"],
+                        "description": adapter.get("description"),
                         "ipv4": adapter["ipv4"],
                     })
 
@@ -211,26 +219,48 @@ class StatusCollector(Collector):
     def _parse_ipconfig_adapters(self, output: str) -> list[dict]:
         """Parse ipconfig /all output into a list of adapter dicts.
 
-        We split on lines that look like adapter headers ("X adapter Y:") and
-        pull out the name plus any IPv4 address inside the section.
+        Each adapter section in ipconfig /all is structured as:
+            <Type> adapter <Name>:
+                Description . . . . . . . . . . . : <human-friendly driver name>
+                ...
+                IPv4 Address. . . . . . . . . . . : <ip>(Preferred)
+                ...
+
+        We capture BOTH the section header name AND the Description line, because
+        the human-friendly VPN identity (TAP-Windows, WireGuard Tunnel, etc.) is
+        usually in Description while the header just says something like "LetsTAP"
+        or "Unknown adapter" that doesn't tell us what kind of adapter it is.
         """
         adapters: list[dict] = []
         current: dict | None = None
 
         for line in output.splitlines():
-            # adapter header line: "Wi-Fi adapter Wi-Fi:" or "Ethernet adapter Ethernet:"
+            # adapter header line: catches "Wi-Fi adapter Wi-Fi:", "Ethernet adapter
+            # Ethernet:", "Unknown adapter LetsTAP:", "Tunnel adapter Local Area
+            # Connection* 1:", etc. anything ending with an adapter section colon
             header_m = re.match(r"^([A-Za-z0-9 \-]+adapter\s+.+?):\s*$", line)
             if header_m:
                 if current is not None:
                     adapters.append(current)
-                current = {"name": header_m.group(1).strip(), "ipv4": None}
+                current = {
+                    "name": header_m.group(1).strip(),
+                    "description": None,
+                    "ipv4": None,
+                }
                 continue
 
             if current is None:
                 continue
 
-            # look for IPv4 Address lines. handle both "192.168.1.42" and
-            # "192.168.1.42(Preferred)" forms
+            # Description line: the driver-friendly name. often more identifying
+            # than the header (e.g. header "LetsTAP" vs description "TAP-Windows Adapter V9")
+            desc_m = re.match(r"^\s+Description[.\s]+:\s*(.+?)\s*$", line)
+            if desc_m:
+                current["description"] = desc_m.group(1).strip()
+                continue
+
+            # IPv4 Address: handles both plain "192.168.1.42" and the
+            # "192.168.1.42(Preferred)" annotated form
             ipv4_m = re.search(
                 r"IPv4 Address[.\s]+:\s*(\d+\.\d+\.\d+\.\d+)", line
             )
@@ -240,7 +270,6 @@ class StatusCollector(Collector):
         if current is not None:
             adapters.append(current)
         return adapters
-
 
 if __name__ == "__main__":
     # manual test: python -m src.collectors.status

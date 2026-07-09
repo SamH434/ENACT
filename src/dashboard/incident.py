@@ -700,7 +700,7 @@ def main() -> None:
         resizable=True,
         background_color="#000000",
     )
-    webview.start(gui="edgechromium", debug=True)
+    webview.start(gui="edgechromium")
 
 
 if __name__ == "__main__":

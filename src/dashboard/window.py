@@ -105,10 +105,10 @@ _DASHBOARD_HTML = r"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <title>ENACT</title>
 <!-- DSEG7-Classic: authentic seven-segment LCD font for the clock readout.
-     falls back to Cascadia Mono automatically if the CDN is unreachable -->
+     falls back to MingLiU_HKSCS-ExtB automatically if the CDN is unreachable -->
 <style>
 @font-face {
-    font-family: 'DSEG7 Classic';
+    font-family: 'MingLiU_HKSCS-ExtB';
     src: url('https://cdn.jsdelivr.net/gh/keshikan/DSEG@master/fonts/DSEG7-Classic/DSEG7Classic-Bold.woff2') format('woff2');
     font-weight: bold;
     font-style: normal;
@@ -155,7 +155,7 @@ html, body {
     height: 100vh;
     background: var(--bg);
     color: var(--amber);
-    font-family: 'Cascadia Mono', 'Consolas', 'Courier New', monospace;
+    font-family: 'MingLiU_HKSCS-ExtB', 'Consolas', 'Courier New', monospace;
     font-size: 13px;
     overflow: hidden;
     text-shadow: var(--glow-amber);
@@ -221,23 +221,26 @@ html, body {
     align-items: center;
     justify-content: center;
     padding: 0 16px;
-    gap: 24px;
+    gap: 18px;
 }
 #header .label {
     background: var(--amber-bright);
     color: var(--bg);
     font-weight: bold;
-    padding: 4px 12px;
-    letter-spacing: 1px;
+    padding: 4px 8px;
+    letter-spacing: 0.5px;
+    font-size: 30px;
 }
 #header .subtitle {
     color: var(--amber);
     font-weight: bold;
     letter-spacing: 1px;
+    font-size: 24px;
 }
 #header .date {
     color: var(--cyan);
     margin-left: auto;
+    font-size: 20px;
 }
 
 /* clock panel: large numeric readout, label above */
@@ -248,23 +251,34 @@ html, body {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 8px;
+    padding: 6px 12px;
+    overflow: hidden;
 }
 #clock .label {
     color: var(--text-mute);
-    font-size: 11px;
-    letter-spacing: 1px;
-    margin-bottom: 4px;
+    font-size: 10px;
+    letter-spacing: 2px;
+    margin-bottom: 2px;
+    text-shadow: var(--glow-cyan);
 }
-#clock .time {
+/* the numeric readout wrapper keeps both parts (HH:MM:SS and .mmm) on the
+   same baseline at the same size, so nothing looks off-scale */
+#clock .readout {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    line-height: 1;
     color: var(--amber-bright);
+    /* DSEG7 primary, MingLiU_HKSCS-ExtB fallback if the CDN doesn't load */
+    font-family: 'MingLiU_HKSCS-ExtB', 'MingLiU_HKSCS-ExtB', 'Consolas', monospace;
     font-weight: bold;
-    font-size: 22px;
-    letter-spacing: 1px;
+    font-size: 42px;         /* fills the box vertically */
+    letter-spacing: 2px;
+    text-shadow: var(--glow-amber);
 }
-#clock .ms {
+#clock .readout .ms {
     color: var(--amber);
-    font-size: 18px;
+    font-size: 42px;         /* same size as time, differentiated only by color */
 }
 
 /* footer hint bar */
@@ -585,13 +599,15 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     <!-- top bar: title + clock -->
     <div id="topbar">
         <div id="header">
-            <span class="label">[ ENACT ]</span>
-            <span class="subtitle">ENGINE FOR NETWORK ANOMALY, CONDITION, AND TELEMETRY</span>
+            <span class="label">ENACT</span>
+            <span class="subtitle">ENGINE FOR NETWORK ANOMALY CONDITION AND TELEMETRY</span>
             <span class="date" id="header-date"></span>
         </div>
         <div id="clock">
             <div class="label">ACTIVE TIME DISPLAY</div>
-            <div><span class="time" id="clock-time">00:00:00</span><span class="ms" id="clock-ms">.000</span></div>
+            <div class="readout">
+                <span class="time" id="clock-time">00:00:00</span><span class="ms" id="clock-ms">.000</span>
+            </div>
         </div>
     </div>
 
@@ -999,6 +1015,26 @@ async function tickSnapshot() {
 
 let chart = null;
 
+/* small Chart.js plugin that applies a colored shadow to each line dataset
+   as it's drawn. gives the traces the same "dimly lit CRT" glow as the rest
+   of the dashboard's text. the shadow color is taken from each dataset's own
+   borderColor, so it self-matches per trace */
+const lineGlowPlugin = {
+    id: 'lineGlow',
+    beforeDatasetDraw(chart, args) {
+        const dataset = chart.data.datasets[args.index];
+        const ctx = chart.ctx;
+        ctx.save();
+        ctx.shadowColor = dataset.borderColor;
+        ctx.shadowBlur = 10;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+    },
+    afterDatasetDraw(chart) {
+        chart.ctx.restore();
+    },
+};
+
 /* initialize the streaming line chart for the latency oscilloscope */
 function initChart() {
     const ctx = document.getElementById("chart-canvas").getContext("2d");
@@ -1018,6 +1054,7 @@ function initChart() {
     chart = new Chart(ctx, {
         type: "line",
         data: { datasets },
+        plugins: [lineGlowPlugin],
         options: {
             animation: false,
             responsive: true,
@@ -1030,7 +1067,7 @@ function initChart() {
                     align: "end",
                     labels: {
                         color: "#d7af00",
-                        font: { family: "Cascadia Mono, monospace", size: 11 },
+                        font: { family: "MingLiU_HKSCS-ExtB, monospace", size: 11 },
                         boxWidth: 12,
                         usePointStyle: false,
                     },
@@ -1049,7 +1086,7 @@ function initChart() {
                     grid: { color: "rgba(0, 175, 255, 0.10)" },
                     ticks: {
                         color: "#5a7e8a",
-                        font: { family: "Cascadia Mono, monospace", size: 10 },
+                        font: { family: "MingLiU_HKSCS-ExtB, monospace", size: 10 },
                     },
                 },
                 y: {
@@ -1062,14 +1099,14 @@ function initChart() {
                     grid: { color: "rgba(0, 175, 255, 0.10)" },
                     ticks: {
                         color: "#5a7e8a",
-                        font: { family: "Cascadia Mono, monospace", size: 10 },
+                        font: { family: "MingLiU_HKSCS-ExtB, monospace", size: 10 },
                         callback: v => v + "ms",
                     },
                     title: {
                         display: true,
                         text: "LATENCY",
                         color: "#5a7e8a",
-                        font: { family: "Cascadia Mono, monospace", size: 10 },
+                        font: { family: "MingLiU_HKSCS-ExtB, monospace", size: 10 },
                     },
                 },
             },

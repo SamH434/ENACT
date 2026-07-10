@@ -171,14 +171,14 @@ def _header_panel(critical_active: bool) -> Panel:
 
     if critical_active:
         title = Text()
-        title.append("  [ ENACT ]  ", style=f"bold {COLOR_BG_BLACK} on {COLOR_RED}")
+        title.append("ENACT", style=f"bold {COLOR_BG_BLACK} on {COLOR_RED}")
         title.append("  CODE: 102  ·  EMERGENCY  ", style=f"bold {COLOR_RED} on {COLOR_BG_BLACK}")
         title.append(f"  {date}  ", style=f"{COLOR_RED_DIM}")
         border = COLOR_RED
     else:
         title = Text()
-        #title.append("  [ ENACT ]  ", style=f"bold {COLOR_BG_BLACK} on {COLOR_AMBER_BRIGHT}")
-        title.append("  [ ENGINE FOR NETWORK ANOMALY, CONDITION, AND TELEMETRY ]  ", style=f"bold {COLOR_AMBER}")
+        #title.append("ENACT", style=f"bold {COLOR_BG_BLACK} on {COLOR_AMBER_BRIGHT}")
+        title.append("  [ ENGINE FOR NETWORK ANOMALY CONDITION AND TELEMETRY ]  ", style=f"bold {COLOR_AMBER}")
         title.append(f"  {date}  ", style=COLOR_CYAN)
         border = COLOR_AMBER
 

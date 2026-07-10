@@ -104,6 +104,17 @@ _DASHBOARD_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <title>ENACT</title>
+<!-- DSEG7-Classic: authentic seven-segment LCD font for the clock readout.
+     falls back to Cascadia Mono automatically if the CDN is unreachable -->
+<style>
+@font-face {
+    font-family: 'DSEG7 Classic';
+    src: url('https://cdn.jsdelivr.net/gh/keshikan/DSEG@master/fonts/DSEG7-Classic/DSEG7Classic-Bold.woff2') format('woff2');
+    font-weight: bold;
+    font-style: normal;
+    font-display: swap;
+}
+</style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.4/moment.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-adapter-moment/1.0.1/chartjs-adapter-moment.min.js"></script>
@@ -119,10 +130,21 @@ _DASHBOARD_HTML = r"""<!DOCTYPE html>
     --cyan-dim: #5a7e8a;
     --cyan-mute: rgba(0, 175, 255, 0.10);
     --red: #ff3030;
+    --red-bright: #ff5050;
     --red-dim: #b04040;
+    --red-mute: rgba(255, 48, 48, 0.15);
     --green-dim: #5fcf5f;
     --yellow: #ffd700;
     --text-mute: #5a7e8a;
+
+    /* text glow variants: subtle color-halo behind letters for the
+       "dimly lit control room" aesthetic. add via text-shadow */
+    --glow-amber:  0 0 6px rgba(215, 175, 0, 0.45);
+    --glow-cyan:   0 0 6px rgba(0, 175, 255, 0.45);
+    --glow-red:    0 0 8px rgba(255, 48, 48, 0.55);
+    --glow-green:  0 0 6px rgba(95, 207, 95, 0.45);
+    --glow-yellow: 0 0 6px rgba(255, 215, 0, 0.45);
+    --glow-white:  0 0 6px rgba(255, 255, 255, 0.35);
 }
 
 * { box-sizing: border-box; }
@@ -136,6 +158,8 @@ html, body {
     font-family: 'Cascadia Mono', 'Consolas', 'Courier New', monospace;
     font-size: 13px;
     overflow: hidden;
+    text-shadow: var(--glow-amber);
+
 }
 
 /* full-window CSS grid: header row, body grid, footer row */
@@ -280,6 +304,24 @@ td.source { color: var(--cyan); }
 td.age    { color: var(--cyan); font-size: 12px; }
 td.value  { color: var(--amber-bright); font-weight: bold; text-align: right; }
 td.right  { text-align: right; }
+/* per-color glow overrides: text-shadow should match the text color, not
+   inherit body-level amber, otherwise cyan text sits inside an amber halo */
+td.source, td.age    { text-shadow: var(--glow-cyan); }
+td.value             { text-shadow: var(--glow-amber); }
+.status-ok           { text-shadow: var(--glow-green); }
+.status-error        { text-shadow: var(--glow-red); }
+.sev-info            { text-shadow: var(--glow-cyan); }
+.sev-warning         { text-shadow: var(--glow-yellow); }
+.sev-critical        { text-shadow: var(--glow-red); }
+.summary-info        { text-shadow: var(--glow-cyan); }
+.summary-warning     { text-shadow: var(--glow-amber); }
+.summary-critical    { text-shadow: var(--glow-red); }
+
+/* value boxes in event summaries get a slight glow too, keyed by class */
+.val-box.val-hash    { text-shadow: var(--glow-cyan); }
+.val-box.val-ip,
+.val-box.val-num     { text-shadow: var(--glow-amber); }
+.val-arrow           { text-shadow: var(--glow-cyan); }
 td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left; }
 
 /* value boxes for event summaries: wrap changing values so the eye can

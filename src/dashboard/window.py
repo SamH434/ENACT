@@ -526,68 +526,67 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     letter-spacing: 1px;
 }
 
-/* alarm overlay: full-window red flash on critical events, then fades out */
+/* alarm overlay: strobing EMERGENCY box centered over the dashboard.
+   only the box itself flashes. no full-screen tint, no fade, no shake.
+   the strobe is a hard on/off using CSS steps() timing, not a gradient. */
 #alarm-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(180, 0, 0, 0.75);
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
     z-index: 1000;
     pointer-events: none;
-    animation: alarm-flash 2.5s ease-out forwards;
+    background: transparent;
 }
 #alarm-overlay.hidden { display: none; }
-@keyframes alarm-flash {
-    0%    { background: rgba(255, 0, 0, 0.0); }
-    5%    { background: rgba(255, 30, 30, 0.85); }
-    15%   { background: rgba(180, 0, 0, 0.60); }
-    25%   { background: rgba(255, 30, 30, 0.85); }
-    35%   { background: rgba(180, 0, 0, 0.60); }
-    50%   { background: rgba(255, 30, 30, 0.75); }
-    85%   { background: rgba(180, 0, 0, 0.50); }
-    100%  { background: rgba(180, 0, 0, 0.0); }
-}
-.alarm-content {
-    text-align: center;
-    color: white;
-    text-shadow: 0 0 20px black, 0 0 40px rgba(255, 0, 0, 0.8);
-    padding: 40px 80px;
-    border: 6px solid white;
-    background: rgba(0, 0, 0, 0);
-}
-@keyframes alarm-shake {
-    0%, 100% { transform: translate(0, 0); }
-    25%      { transform: translate(-3px, 2px); }
-    50%      { transform: translate(2px, -2px); }
-    75%      { transform: translate(-2px, -1px); }
-}
-.alarm-title {
-    font-size: 62px;
+
+/* the strobing box: this is the only element that animates. fills its
+   viewport width mostly, EMERGENCY text fills the box top to bottom */
+.alarm-strobe {
+    background: #c00000;
+    color: #ffffff;
+    border: 6px solid #ff3030;
+    padding: 24px 60px;
     font-weight: bold;
-    letter-spacing: 8px;
-    margin-bottom: 12px;
-    color: #ffdddd;
+    font-size: 14vw;              /* scales with viewport, always huge */
+    letter-spacing: 0.05em;
+    line-height: 1;
+    text-shadow: 0 0 24px rgba(255, 255, 255, 0.6),
+                 0 0 8px rgba(255, 255, 255, 0.9);
+    box-shadow: 0 0 60px rgba(255, 0, 0, 0.5);
+    /* discrete on/off strobe. total run: 6 iterations × 0.4s = 2.4s */
+    animation: strobe-blink 0.4s steps(1, end) 6;
 }
-.alarm-code {
-    font-size: 20px;
-    letter-spacing: 4px;
-    color: #ffaaaa;
-    margin-bottom: 20px;
+@keyframes strobe-blink {
+    0%, 49%   { opacity: 1; visibility: visible; }
+    50%, 100% { opacity: 0; visibility: hidden; }
 }
-.alarm-summary {
-    font-size: 16px;
-    color: white;
-    max-width: 700px;
-    margin: 0 auto 20px auto;
-    line-height: 1.4;
+
+/* info block below the strobing box: event summary and status. does NOT
+   strobe — it stays static and readable throughout the alarm */
+.alarm-info {
+    margin-top: 22px;
+    text-align: center;
+    color: #ffbfbf;
+    background: rgba(0, 0, 0, 0.75);
+    padding: 14px 28px;
+    border: 2px solid rgba(255, 48, 48, 0.6);
+    max-width: 70vw;
+    text-shadow: 0 0 8px rgba(255, 0, 0, 0.7);
 }
-.alarm-launch {
-    font-size: 12px;
+.alarm-info .summary {
+    font-size: 14px;
+    letter-spacing: 1px;
+    color: #ffffff;
+    margin-bottom: 8px;
+    line-height: 1.35;
+}
+.alarm-info .launch {
+    font-size: 11px;
     letter-spacing: 3px;
-    color: #ffaaaa;
-    margin-top: 24px;
+    color: #ff8888;
 }
 
 </style>
@@ -691,14 +690,13 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     <!-- footer -->
     <div id="footer">PRESS ALT+F4 OR CLOSE WINDOW TO DISENGAGE</div>
 
-    <!-- alarm overlay: hidden by default, flashes over the whole window on
-         critical events, then fades out and triggers the incident window -->
+    <!-- alarm overlay: strobes the EMERGENCY word only, with static info below.
+         no full-screen tint, no fade animation — hard on/off strobe -->
     <div id="alarm-overlay" class="hidden">
-        <div class="alarm-content">
-            <div class="alarm-title">⚠ EMERGENCY ⚠</div>
-            <div class="alarm-code">CRITICAL EVENT DETECTED</div>
-            <div class="alarm-summary" id="alarm-overlay-summary"></div>
-            <div class="alarm-launch">LAUNCHING INCIDENT REPORT...</div>
+        <div class="alarm-strobe">EMERGENCY</div>
+        <div class="alarm-info">
+            <div class="summary" id="alarm-overlay-summary"></div>
+            <div class="launch">LAUNCHING INCIDENT REPORT...</div>
         </div>
     </div>
 
@@ -1192,10 +1190,11 @@ async function triggerAlarm(event) {
     document.getElementById("alarm-overlay-summary").textContent =
         `${event.type.toUpperCase()} · ${event.summary}`;
     overlay.classList.remove("hidden");
-    // restart the CSS animation by re-triggering it
-    overlay.style.animation = "none";
-    void overlay.offsetWidth;  // force reflow
-    overlay.style.animation = "";
+    // restart the strobe animation by cloning the class off/on the child
+    const strobe = overlay.querySelector(".alarm-strobe");
+    strobe.style.animation = "none";
+    void strobe.offsetWidth;
+    strobe.style.animation = "";
 
     // launch the incident window mid-flash so it appears just as the flash ends
     setTimeout(() => {

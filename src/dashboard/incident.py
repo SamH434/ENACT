@@ -88,6 +88,13 @@ _INCIDENT_HTML = r"""<!DOCTYPE html>
     --green-dim: #5fcf5f;
     --yellow: #ffd700;
     --text-mute: #7a8a90;
+
+    --glow-amber:  0 0 6px rgba(215, 175, 0, 0.45);
+    --glow-cyan:   0 0 6px rgba(0, 175, 255, 0.45);
+    --glow-red:    0 0 8px rgba(255, 48, 48, 0.55);
+    --glow-green:  0 0 6px rgba(95, 207, 95, 0.45);
+    --glow-yellow: 0 0 6px rgba(255, 215, 0, 0.45);
+    --glow-white:  0 0 6px rgba(255, 255, 255, 0.35);
 }
 
 * { box-sizing: border-box; }
@@ -101,6 +108,7 @@ html, body {
     font-family: 'Cascadia Mono', 'Consolas', 'Courier New', monospace;
     font-size: 13px;
     overflow: hidden;
+    text-shadow: var(--glow-red);  /* incident window is red-themed by default */
 }
 
 /* full-window layout: alarm banner across top, then a three-region body */

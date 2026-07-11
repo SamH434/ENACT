@@ -94,6 +94,32 @@ class DashboardAPI:
         except Exception as e:
             print(f"[ENACT] failed to launch incident window: {e}")
             return False
+    
+    # creates a synthetic critical event in the database so the alarm system
+    # picks it up naturally on its next tick. lets the user demo the emergency
+    # flow without needing to run injection scripts in a separate terminal
+    def trigger_test_incident(self) -> dict:
+        try:
+            from src.analyzers.base import Event
+            from datetime import datetime, timezone
+            event = Event(
+                type="test_alarm",
+                severity="critical",
+                summary=("TEST · Synthetic alarm from dashboard button "
+                         "(no real anomaly)"),
+                evidence={
+                    "test": True,
+                    "note": "This event was triggered by the TRIGGER TEST "
+                            "INCIDENT button on the dashboard.",
+                    "purpose": "verifies the alarm flash and incident window "
+                               "end-to-end without a real anomaly",
+                },
+                timestamp=datetime.now(timezone.utc),
+            )
+            event_id = database.store_event(event)
+            return {"ok": True, "event_id": event_id}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
 
 
 
@@ -287,9 +313,33 @@ html, body {
     color: var(--cyan-dim);
     display: flex;
     align-items: center;
-    justify-content: center;
+    justify-content: space-between;
+    padding: 0 12px;
     font-size: 11px;
     letter-spacing: 1px;
+    text-shadow: var(--glow-cyan);
+}
+#footer .footer-hint {
+    text-shadow: var(--glow-cyan);
+}
+.footer-btn {
+    background: transparent;
+    color: var(--amber);
+    border: 2px solid var(--amber);
+    padding: 4px 14px;
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: bold;
+    letter-spacing: 2px;
+    cursor: pointer;
+    transition: all 0.12s ease;
+    text-shadow: var(--glow-amber);
+}
+.footer-btn:hover {
+    background: var(--red);
+    color: black;
+    border-color: var(--red);
+    text-shadow: none;
 }
 
 /* tables: align cells, color headers, mute borders */
@@ -589,6 +639,99 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     color: #ff8888;
 }
 
+/* small info button next to panel titles: click opens a popup explaining
+   what the panel shows. styled like the incident window's ACK button */
+.info-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    margin-left: 8px;
+    background: transparent;
+    color: var(--amber);
+    border: 1px solid var(--amber);
+    border-radius: 50%;
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: bold;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+    vertical-align: middle;
+    pointer-events: auto;
+    transition: all 0.12s ease;
+    text-shadow: var(--glow-amber);
+}
+.info-btn:hover {
+    background: var(--red);
+    color: black;
+    border-color: var(--red);
+    text-shadow: none;
+}
+
+/* centered popup card that appears when an info button is clicked.
+   modal-style with a dimmed backdrop, click-outside dismisses */
+#info-popup {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 800;
+}
+#info-popup.hidden { display: none; }
+#info-popup .card {
+    width: 520px;
+    max-width: 78vw;
+    background: var(--bg-panel);
+    border: 3px solid var(--amber);
+    padding: 22px 28px 18px;
+    color: var(--amber);
+    box-shadow: 0 0 60px rgba(0, 0, 0, 0.9),
+                0 0 24px rgba(215, 175, 0, 0.25);
+}
+#info-popup .title {
+    color: var(--amber-bright);
+    font-weight: bold;
+    letter-spacing: 2px;
+    font-size: 14px;
+    margin-bottom: 12px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid rgba(0, 175, 255, 0.25);
+    text-shadow: var(--glow-amber);
+}
+#info-popup .body {
+    color: var(--amber);
+    font-size: 12.5px;
+    line-height: 1.55;
+    margin-bottom: 18px;
+}
+#info-popup .btn-row {
+    display: flex;
+    justify-content: flex-end;
+}
+.info-close-btn {
+    background: transparent;
+    color: var(--amber);
+    border: 2px solid var(--amber);
+    padding: 6px 20px;
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: bold;
+    letter-spacing: 2px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    text-shadow: var(--glow-amber);
+}
+.info-close-btn:hover {
+    background: var(--red);
+    color: black;
+    border-color: var(--red);
+    text-shadow: none;
+}
+
 </style>
 </head>
 <body>
@@ -615,7 +758,7 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
 
         <!-- connectivity status: three stacked boxes spanning both rows -->
         <div id="status-strip">
-            <span class="panel-title">[ STATUS ]</span>
+            <span class="panel-title">[ STATUS ] <button class="info-btn" data-info="status">i</button></span>
             <div class="status-box na" id="status-wifi">
                 <div class="label">WI-FI</div>
                 <div class="value">—</div>
@@ -635,7 +778,7 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
 
         <!-- top-left: collector health -->
         <div class="panel">
-            <span class="panel-title">[ COLLECTOR HEALTH MONITOR ]</span>
+            <span class="panel-title">[ COLLECTOR HEALTH MONITOR ] <button class="info-btn" data-info="health">i</button></span>
             <table id="tbl-health">
                 <thead><tr>
                     <th>UNIT</th><th>LAST</th><th>STATUS</th>
@@ -647,7 +790,7 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
 
         <!-- top-right: telemetry readout -->
         <div class="panel">
-            <span class="panel-title">[ TELEMETRY READOUT ]</span>
+            <span class="panel-title">[ TELEMETRY READOUT ] <button class="info-btn" data-info="metrics">i</button></span>
             <table id="tbl-metrics">
                 <thead><tr>
                     <th>SOURCE</th><th>METRIC</th>
@@ -659,7 +802,7 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
 
         <!-- bottom-left: event log -->
         <div class="panel">
-            <span class="panel-title">[ EVENT LOG ]</span>
+            <span class="panel-title">[ EVENT LOG ] <button class="info-btn" data-info="events">i</button></span>
             <div class="scroll-area">
                 <table id="tbl-events">
                     <thead><tr>
@@ -672,7 +815,7 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
 
         <!-- bottom-right: live latency oscilloscope -->
         <div class="panel">
-            <span class="panel-title">[ LATENCY TRACE · LIVE OSCILLOSCOPE ]</span>
+            <span class="panel-title">[ LATENCY TRACE · LIVE OSCILLOSCOPE ] <button class="info-btn" data-info="latency">i</button></span>
             <div id="chart-canvas-wrap">
                 <canvas id="chart-canvas"></canvas>
                 <!-- overlay: shown only when chart has no data to draw.
@@ -687,8 +830,11 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
 
     </div>
 
-    <!-- footer -->
-    <div id="footer">PRESS ALT+F4 OR CLOSE WINDOW TO DISENGAGE</div>
+    <!-- footer with test-incident button on the left, hint text on the right -->
+    <div id="footer">
+        <button class="footer-btn" id="test-alarm-btn">TRIGGER TEST INCIDENT</button>
+        <span class="footer-hint">PRESS ALT+F4 OR CLOSE WINDOW TO DISENGAGE</span>
+    </div>
 
     <!-- alarm overlay: strobes the EMERGENCY word only, with static info below.
          no full-screen tint, no fade animation — hard on/off strobe -->
@@ -700,6 +846,18 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
         </div>
     </div>
 
+    <!-- info popup: opens when the user clicks an (i) button on a panel title.
+         click outside or CLOSE to dismiss -->
+    <div id="info-popup" class="hidden">
+        <div class="card">
+            <div class="title" id="info-popup-title">—</div>
+            <div class="body" id="info-popup-body">—</div>
+            <div class="btn-row">
+                <button class="info-close-btn" id="info-popup-close">CLOSE</button>
+            </div>
+        </div>
+    </div>
+
 </div>
 
 <script>
@@ -708,6 +866,30 @@ const TRACE_TARGETS = TRACE_TARGETS_PLACEHOLDER;
 const TRACE_LABELS = TRACE_LABELS_PLACEHOLDER;
 const REFRESH_MS = REFRESH_MS_PLACEHOLDER;
 const CHART_REFRESH_MS = CHART_REFRESH_MS_PLACEHOLDER;
+
+/* text shown in the info popup for each panel. click the (i) buttons to view */
+const PANEL_INFO = {
+    status: {
+        title: "CONNECTIVITY STATUS",
+        body: "Live state of your Wi-Fi association, internet reachability, and VPN tunnel. WI-FI reports the SSID you're associated with. INTERNET is a composite of DNS resolution and ICMP reachability — a 'DEGRADED' reading typically means ICMP is filtered by a firewall or VPN while DNS still works. VPN reports whether a tunnel adapter is currently active on your machine.",
+    },
+    health: {
+        title: "COLLECTOR HEALTH MONITOR",
+        body: "Reports the most recent cycle of each collector. UNIT is the collector name. LAST is how long ago it ran. STATUS is 'ok' if the cycle completed without error. DUR is how long the cycle took to run. SAMPLES is how many telemetry records it produced. If a status stays red or the LAST value grows unboundedly, that collector is unhealthy.",
+    },
+    metrics: {
+        title: "TELEMETRY READOUT",
+        body: "The most recent value of every metric being collected. SOURCE is which collector produced it, METRIC identifies what's being measured, VALUE is the latest reading, and AGE is how long ago it was captured. This is the raw telemetry that analyzers reason over.",
+    },
+    events: {
+        title: "EVENT LOG",
+        body: "Chronological log of anomalies detected by the analyzers. Severity is INFO (routine change), WARN (something notable), or CRIT (something wrong). Critical events also trigger a full-screen alarm and open a dedicated incident window. Boxed values in each summary are the diagnostic data — fingerprints, IPs, hop counts — so the eye can catch what actually changed at a glance.",
+    },
+    latency: {
+        title: "LATENCY TRACE · LIVE OSCILLOSCOPE",
+        body: "Live ping latency to three public DNS resolvers: Cloudflare, Google, and Quad9. Uses ICMP echo. If the chart shows 'NO DATA · ICMP BLOCKED OR UNREACHABLE', your network drops ping packets — common with VPNs and corporate firewalls — and this specific chart can't gather data. Other collectors (DNS resolution timing, route tracing) still work under those conditions.",
+    },
+};
 
 /* convert an ISO timestamp to a short "X ago" string */
 function ago(isoTs) {
@@ -1140,12 +1322,71 @@ async function pullLatency(chart) {
    the DOM). we DO wait for pywebviewready for the polling loops, but with a
    fallback timeout in case the event was already fired before our listener bound. */
 
+/* wire up the (i) buttons on each panel title. click opens the info popup
+   with content from PANEL_INFO; click outside or CLOSE dismisses */
+function initInfoButtons() {
+    const popup = document.getElementById("info-popup");
+    const titleEl = document.getElementById("info-popup-title");
+    const bodyEl = document.getElementById("info-popup-body");
+
+    document.querySelectorAll(".info-btn").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const key = btn.dataset.info;
+            const info = PANEL_INFO[key];
+            if (!info) return;
+            titleEl.textContent = info.title;
+            bodyEl.textContent = info.body;
+            popup.classList.remove("hidden");
+        });
+    });
+    document.getElementById("info-popup-close").addEventListener("click", () => {
+        popup.classList.add("hidden");
+    });
+    // click on the backdrop (not the card) to dismiss
+    popup.addEventListener("click", (e) => {
+        if (e.target.id === "info-popup") popup.classList.add("hidden");
+    });
+    // ESC also dismisses
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") popup.classList.add("hidden");
+    });
+}
+
+/* wire the TRIGGER TEST INCIDENT button. calls into python to insert a
+   synthetic critical event, which the alarm watcher then picks up naturally
+   on its next tick (~2s). same code path as a real event */
+function initTestAlarmButton() {
+    const btn = document.getElementById("test-alarm-btn");
+    if (!btn) return;
+    btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        btn.textContent = "TRIGGERING...";
+        try {
+            const result = await window.pywebview.api.trigger_test_incident();
+            if (!result || !result.ok) {
+                btn.textContent = "TEST FAILED";
+                setTimeout(() => {
+                    btn.textContent = "TRIGGER TEST INCIDENT";
+                    btn.disabled = false;
+                }, 2000);
+                return;
+            }
+        } catch (e) { /* ignore */ }
+        // reset the button after a short cooldown so users don't spam it
+        setTimeout(() => {
+            btn.textContent = "TRIGGER TEST INCIDENT";
+            btn.disabled = false;
+        }, 3000);
+    });
+}
+
 function bootUiOnly() {
-    // clock is pure JS, kick it off immediately
     tickClock();
     setInterval(tickClock, 50);
-    // chart canvas doesn't need pywebview to initialize either
     setTimeout(initChart, 200);
+    initInfoButtons();  
+    initTestAlarmButton();
 }
 
 /* watermark for the alarm system: only fire for events strictly newer than this.

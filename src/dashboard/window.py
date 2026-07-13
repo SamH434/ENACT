@@ -595,7 +595,7 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
                  0 0 8px rgba(255, 255, 255, 0.9);
     box-shadow: 0 0 60px rgba(255, 0, 0, 0.5);
     /* discrete on/off strobe. total run: 6 iterations × 0.4s = 2.4s */
-    animation: strobe-blink 0.2s steps(1, end) 4;
+    animation: strobe-blink 0.3s steps(1, end) 4;
 }
 @keyframes strobe-blink {
     0%, 49%   { opacity: 1; visibility: visible; }

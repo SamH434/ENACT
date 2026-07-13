@@ -40,9 +40,13 @@ class IncidentAPI:
     def __init__(self, event_id: int) -> None:
         self.event_id = event_id
 
-    # returns the full state the incident UI needs: the event, its evidence,
-    # and any samples that have arrived since the event fired
+    # returns the full state the incident UI needs. handles two modes:
+    # test mode (event_id == -1) returns canned event data with no DB touch,
+    # normal mode looks up the actual event by id and pulls its evidence
     def get_incident_state(self) -> dict:
+        if self.event_id == -1:
+            return self._test_mode_state()
+
         event = database.event_by_id(self.event_id)
         if event is None:
             return {"error": f"event {self.event_id} not found"}
@@ -60,6 +64,45 @@ class IncidentAPI:
             "samples": samples,
         }
 
+    # canned event state used when the user hits TRIGGER TEST INCIDENT.
+    # returns synthetic-but-plausible-looking content so the UI populates fully
+    # for demo purposes, but nothing is stored in the database
+    def _test_mode_state(self) -> dict:
+        from datetime import datetime, timezone
+        now_iso = datetime.now(timezone.utc).isoformat()
+        return {
+            "event": {
+                "id": -1,
+                "ts": now_iso,
+                "type": "test_incident",
+                "severity": "critical",
+                "summary": ("TEST · This is a synthetic incident triggered "
+                            "from the dashboard. No real anomaly detected."),
+            },
+            "evidence": {
+                "test_mode": True,
+                "purpose": "verify incident window UX end-to-end",
+                "note": ("this event was not stored in the events table "
+                         "and will not appear in the main dashboard log"),
+                "trigger": "TRIGGER TEST INCIDENT button",
+            },
+            "samples": {
+                "connectivity": [{
+                    "ts": now_iso,
+                    "metric": "latency_ms",
+                    "value": 42.0,
+                    "meta": {"target": "1.1.1.1", "note": "test sample"},
+                }],
+                "dns": [{
+                    "ts": now_iso,
+                    "metric": "resolution_ms",
+                    "value": 15.0,
+                    "meta": {"hostname": "cloudflare.com",
+                             "success": True, "note": "test sample"},
+                }],
+            },
+        }
+        
     # the "MARK ACKNOWLEDGED" button. currently just closes the window.
     # future enhancement: write ack state to a table so events show as
     # handled in the main dashboard

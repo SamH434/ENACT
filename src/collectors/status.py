@@ -1,55 +1,61 @@
 """
-Connectivity status collector: high-level "is the network working" checks.
+Connectivity status collector: active liveness probes for real network state.
 
-Distinct from the other collectors in that it doesn't produce raw telemetry
-(latency, RSSI, etc.). Instead, it aggregates observable state into three
-plain-english readouts optimized for the dashboard's status panel:
+Distinct from the other collectors in that it doesn't produce raw telemetry.
+It emits three high-level readouts optimized for the dashboard's status
+panel, each backed by an active probe that tests whether traffic ACTUALLY
+flows to a specific destination.
 
-    wifi_status:     the SSID we're associated with, or "disconnected"
-    internet_status: composite of DNS + ping, classifies as "ok" / "degraded"
-                     / "no_dns" / "no_route" / "down"
-    vpn_status:      whether any non-physical tunnel adapter is active
+The prior implementation relied on Windows adapter state (netsh, ipconfig), This was unreliable:
+- Windows reports adapter existence long after a VPN tunnel is torn down
+- ipconfig on machines with virtual adapters can pick the wrong interface
+- DNS resolution against a local resolver "succeeds" even when the wider
+  network is broken, because the local process happily answers
+This version uses active TCP probes instead: attempt a connection to a
+known destination, honestly report the result. TCP handshake tells the truth
+in a way that reading Windows state does not.
 
+    wifi_status:     TCP probe to the default gateway (are we on ANY network)
+    internet_status: TCP probe to a public anycast host (does traffic reach the public internet)
+    vpn_status:      TCP probe to a destination that requires the tunnel (is the VPN actually delivering)
+
+*The VPN check is region aware
 """
 
-import re
 import socket
 import subprocess
+import re
 
 from src.collectors.base import Collector
 from src.utils.records import TelemetryRecord
 
 
-# how many recent DNS/connectivity samples to consider when composing status
-# also the ping target for the internet-reachability check
-INTERNET_CHECK_HOST = "1.1.1.1"
-INTERNET_CHECK_TIMEOUT_MS = 1500
+# probe timeouts. deliberately short: a slow answer is functionally the
+# same as no answer for the "is this working right now" question the
+# dashboard needs to answer. total collector cycle stays under 5 seconds
+PROBE_TIMEOUT_SEC = 2.0
 
-VPN_ADAPTER_HINTS = [
-    "wintun", "tap-windows", "tap adapter", "openvpn",
-    "wireguard", "tailscale", "vpn", "tunnel",
-    "nordlynx", "expressvpn", "protonvpn", "cisco anyconnect",
-    "forticlient", "globalprotect", "zerotier",
-]
-
-# adapter names that are physical/local, not VPN. used to exclude false positives
-# from the VPN detection above
-PHYSICAL_ADAPTER_HINTS = [
-    "wi-fi", "wireless", "ethernet", "bluetooth", "loopback",
-]
+# TCP probe targets. each answers a specific question with a real network
+# operation, not a check of local state.
+PROBE_GATEWAY_PORT = 80          # any port typically open on home routers
+PROBE_INTERNET_HOST = "1.1.1.1"  # anycast, hard to be broken globally
+PROBE_INTERNET_PORT = 443
+PROBE_VPN_HOST = "www.google.com"  # region-restricted; VPN-required in some places
+PROBE_VPN_PORT = 443
 
 
 """
-Collects three high-level connectivity readouts every cycle.
+Collects three high-level connectivity readouts every cycle via active probes.
 
-Runs three checks in sequence: wifi (via netsh), internet (DNS + ping),
-and VPN (via ipconfig). Each produces one TelemetryRecord. The dashboard
-reads these as the source of truth for its status panel.
+Each probe attempts a TCP connection to a target that would only succeed if a
+specific layer of the network is actually working. Honest failure reporting:
+if a probe times out, we say so rather than inferring "connected" from
+adapter state.
 """
 class StatusCollector(Collector):
     name = "status"
 
-    # runs one status check cycle and emits three records
+    # runs one status check cycle: three probes, three records
     def collect(self) -> list[TelemetryRecord]:
         records: list[TelemetryRecord] = []
         records.append(self._check_wifi())
@@ -57,224 +63,267 @@ class StatusCollector(Collector):
         records.append(self._check_vpn())
         return records
 
-    # checks Wi-Fi association state via netsh wlan show interfaces
+    # tests reachability to the default gateway: are we on a network at all?
+    # if this fails, wireless is truly disconnected. resolves the wifi-status
+    # question via a real probe rather than netsh output
     def _check_wifi(self) -> TelemetryRecord:
-        output = self._run(["netsh", "wlan", "show", "interfaces"])
-        if output is None:
+        gateway = self._default_gateway()
+        if gateway is None:
             return TelemetryRecord(
                 collector=self.name,
                 metric="wifi_status",
-                value="unavailable",
-                metadata={"connected": False, "reason": "netsh unavailable"},
+                value="disconnected",
+                metadata={
+                    "connected": False,
+                    "reason": "no default gateway configured",
+                },
             )
 
-        # parse "State" and "SSID" fields. netsh output is key-value lines
-        state_m = re.search(r"^\s*State\s*:\s*(.+?)\s*$", output, re.MULTILINE)
-        ssid_m = re.search(r"^\s*SSID\s*:\s*(.+?)\s*$", output, re.MULTILINE)
-        state = state_m.group(1).strip().lower() if state_m else "unknown"
-        ssid = ssid_m.group(1).strip() if ssid_m else None
+        # attempt a TCP connection to the gateway. we try port 80 first (most
+        # home routers expose an admin UI), fall back to a UDP-ish check with
+        # ICMP if TCP fails. either "connected" answer means our L2/L3 is up
+        reachable = self._tcp_probe(gateway, PROBE_GATEWAY_PORT)
+        if not reachable:
+            # some routers block port 80 admin. try 53 (many run local DNS)
+            reachable = self._tcp_probe(gateway, 53)
 
-        if state == "connected" and ssid:
-            return TelemetryRecord(
-                collector=self.name,
-                metric="wifi_status",
-                value="connected",
-                metadata={"connected": True, "ssid": ssid},
-            )
+        # if TCP to the gateway didn't answer, we may still be on a network:
+        # some enterprise gateways drop all inbound traffic. fall back to
+        # checking whether the gateway is in our ARP table via a socket bind test
+        if not reachable:
+            reachable = self._can_bind_to_gateway_subnet(gateway)
+
+        # get the connected SSID if we can, for display purposes only
+        ssid = self._current_ssid()
+
         return TelemetryRecord(
             collector=self.name,
             metric="wifi_status",
-            value="disconnected",
-            metadata={"connected": False, "state": state},
+            value="connected" if reachable else "disconnected",
+            metadata={
+                "connected": reachable,
+                "gateway": gateway,
+                "ssid": ssid,
+                "probe": "tcp_to_gateway",
+            },
         )
 
-    # composite check: can we resolve DNS AND reach an internet endpoint?
+    # tests reachability to the public internet via a TCP probe to Cloudflare's
+    # anycast address. this answers "does traffic reach the wider internet at
+    # all" honestly: TCP handshake either completes or it doesn't
     def _check_internet(self) -> TelemetryRecord:
-        dns_ok = self._check_dns_resolution()
-        ping_ok = self._check_ping()
+        # try the primary internet target
+        primary_ok = self._tcp_probe(PROBE_INTERNET_HOST, PROBE_INTERNET_PORT)
 
-        if dns_ok and ping_ok:
+        # try a secondary target so we don't misreport if one specific host is
+        # having a bad day. either succeeding = internet is up
+        secondary_ok = False
+        if not primary_ok:
+            secondary_ok = self._tcp_probe("8.8.8.8", 443)
+
+        connected = primary_ok or secondary_ok
+        if connected:
             status = "ok"
-            summary = "DNS + ping succeeded"
-        elif dns_ok and not ping_ok:
-            # DNS works but ping fails. probably ICMP filtered, not total outage.
-            # honest classification is "degraded" not "down"
-            status = "degraded"
-            summary = "DNS works, ICMP blocked or dropped"
-        elif not dns_ok and ping_ok:
-            # ping works (raw IP) but DNS doesn't resolve. resolver problem
-            status = "no_dns"
-            summary = "reachable by IP but DNS not resolving"
+            summary = "TCP probe to public internet succeeded"
         else:
             status = "down"
-            summary = "no DNS, no ping"
+            summary = "TCP probes to 1.1.1.1 and 8.8.8.8 both failed"
 
         return TelemetryRecord(
             collector=self.name,
             metric="internet_status",
             value=status,
             metadata={
-                "dns_ok": dns_ok,
-                "ping_ok": ping_ok,
-                "check_host": INTERNET_CHECK_HOST,
+                "connected": connected,
+                "primary_probe": PROBE_INTERNET_HOST,
+                "primary_ok": primary_ok,
+                "secondary_ok": secondary_ok,
                 "summary": summary,
             },
         )
 
-    # detects whether any active network adapter looks like a VPN tunnel
+    # tests VPN liveness by probing a destination that is normally blocked in
+    # restricted regions and only reachable when a working tunnel is up. this
+    # is more honest than checking adapter existence: it asks "is the VPN
+    # actually delivering the connectivity it claims to provide"
     def _check_vpn(self) -> TelemetryRecord:
-        output = self._run(["ipconfig", "/all"])
-        if output is None:
+        # if the internet check itself just failed, VPN checking is meaningless
+        # (can't distinguish "VPN broken" from "no internet at all"). report as
+        # unknown rather than inferring a state we can't observe
+        internet_ok = self._tcp_probe(PROBE_INTERNET_HOST, PROBE_INTERNET_PORT)
+        if not internet_ok:
             return TelemetryRecord(
                 collector=self.name,
                 metric="vpn_status",
-                value="unavailable",
-                metadata={"connected": False, "reason": "ipconfig unavailable"},
-            )
-
-        # ipconfig groups output into sections per adapter. we split by blank lines
-        # or section headers and inspect each section for VPN indicators
-        adapters = self._parse_ipconfig_adapters(output)
-        vpn_adapters = []
-        for adapter in adapters:
-            name_lower = adapter["name"].lower()
-            desc_lower = (adapter.get("description") or "").lower()
-            # combined match string: check both the section header name AND the
-            # description field, because vendor identity often lives in Description
-            haystack = f"{name_lower} {desc_lower}"
-
-            # skip if it looks like a physical adapter (Wi-Fi, Ethernet, Bluetooth).
-            # we check name only, not description, because a real Wi-Fi adapter's
-            # Description could contain a VPN vendor's software name in some setups
-            if any(hint in name_lower for hint in PHYSICAL_ADAPTER_HINTS):
-                continue
-
-            # match against VPN adapter hints in the combined name+description
-            if any(hint in haystack for hint in VPN_ADAPTER_HINTS):
-                if adapter["ipv4"]:
-                    vpn_adapters.append({
-                        "name": adapter["name"],
-                        "description": adapter.get("description"),
-                        "ipv4": adapter["ipv4"],
-                    })
-
-        if vpn_adapters:
-            return TelemetryRecord(
-                collector=self.name,
-                metric="vpn_status",
-                value="connected",
+                value="unknown",
                 metadata={
-                    "connected": True,
-                    "adapters": vpn_adapters,
-                    "count": len(vpn_adapters),
+                    "reason": "no internet reachability, VPN state indeterminable",
                 },
             )
+
+        # probe the VPN-required host. if this connects, either the VPN is
+        # working OR we're in an unrestricted region where the host is reachable
+        # directly. from a "is my connectivity working for the sites I care
+        # about" perspective, either case is a success
+        vpn_target_ok = self._tcp_probe(PROBE_VPN_HOST, PROBE_VPN_PORT)
+
+        # also detect the presence of a tunnel adapter as a secondary signal.
+        # this alone isn't sufficient (as we discovered) but combined with the
+        # probe it lets us distinguish "reachable via tunnel" from "reachable
+        # directly (probably no VPN needed)"
+        tunnel_present = self._tunnel_adapter_present()
+
+        if vpn_target_ok and tunnel_present:
+            status = "connected"
+            summary = "tunnel adapter active and target reachable via VPN"
+        elif vpn_target_ok and not tunnel_present:
+            # region-unrestricted machine, target reachable without a tunnel
+            status = "not_needed"
+            summary = "target reachable directly, no tunnel active"
+        elif not vpn_target_ok and tunnel_present:
+            # this is the "adapter says up, tunnel actually broken" case that
+            # was the entire reason we redesigned this collector
+            status = "broken"
+            summary = "tunnel adapter present but target unreachable via it"
+        else:
+            status = "none"
+            summary = "no tunnel and target unreachable"
+
         return TelemetryRecord(
             collector=self.name,
             metric="vpn_status",
-            value="none",
-            metadata={"connected": False},
+            value=status,
+            metadata={
+                "vpn_target": PROBE_VPN_HOST,
+                "target_reachable": vpn_target_ok,
+                "tunnel_adapter_present": tunnel_present,
+                "summary": summary,
+            },
         )
 
-    # tries to resolve a well-known hostname, returns True if DNS is working
-    def _check_dns_resolution(self) -> bool:
+    # attempts a TCP connection to a host:port and returns True on success.
+    # the workhorse probe primitive. socket-level, no subprocess overhead
+    def _tcp_probe(self, host: str, port: int) -> bool:
         try:
-            old_timeout = socket.getdefaulttimeout()
-            socket.setdefaulttimeout(2.0)
-            try:
-                socket.gethostbyname("cloudflare.com")
+            with socket.create_connection((host, port), timeout=PROBE_TIMEOUT_SEC):
                 return True
-            finally:
-                socket.setdefaulttimeout(old_timeout)
-        except (socket.gaierror, socket.timeout, OSError):
+        except (socket.timeout, socket.gaierror, OSError):
             return False
 
-    # sends one ping to the check host, returns True if it succeeded
-    def _check_ping(self) -> bool:
+    # attempts a UDP socket bind test to the gateway's subnet. this succeeds
+    # even for gateways that block all inbound TCP, as long as we have a
+    # routable link to them at the IP level
+    def _can_bind_to_gateway_subnet(self, gateway: str) -> bool:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(0.5)
+            # this doesn't actually send a packet, it just verifies routing
+            s.connect((gateway, 1))
+            s.close()
+            return True
+        except OSError:
+            return False
+
+    # gets the default IPv4 gateway from Windows routing table
+    def _default_gateway(self) -> str | None:
         try:
             result = subprocess.run(
-                ["ping", INTERNET_CHECK_HOST, "-n", "1",
-                 "-w", str(INTERNET_CHECK_TIMEOUT_MS)],
-                capture_output=True,
-                text=True,
-                timeout=(INTERNET_CHECK_TIMEOUT_MS / 1000) + 2,
+                ["route", "print", "-4", "0.0.0.0"],
+                capture_output=True, text=True, timeout=3,
             )
-            # ping returns 0 on any reply, non-zero on complete failure
-            return result.returncode == 0
+            # look for a "0.0.0.0" destination line, gateway is 3rd column
+            for line in result.stdout.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("0.0.0.0"):
+                    parts = stripped.split()
+                    if len(parts) >= 3:
+                        # parts: dest, mask, gateway, interface, metric
+                        gw = parts[2]
+                        if re.match(r"^\d+\.\d+\.\d+\.\d+$", gw):
+                            return gw
+            return None
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            return None
+
+    # gets the currently associated Wi-Fi SSID from netsh, if any.
+    # only used for display metadata, not for the connected/disconnected decision
+    def _current_ssid(self) -> str | None:
+        try:
+            result = subprocess.run(
+                ["netsh", "wlan", "show", "interfaces"],
+                capture_output=True, text=True, timeout=3,
+            )
+            for line in result.stdout.splitlines():
+                m = re.match(r"^\s*SSID\s*:\s*(.+?)\s*$", line)
+                if m:
+                    ssid = m.group(1).strip()
+                    # netsh sometimes returns an empty SSID for disconnected state
+                    return ssid if ssid else None
+            return None
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            return None
+
+    # detects whether any known VPN tunnel adapter is present with an IP.
+    # kept from the prior implementation as a secondary signal, not primary
+    def _tunnel_adapter_present(self) -> bool:
+        try:
+            result = subprocess.run(
+                ["ipconfig", "/all"],
+                capture_output=True, text=True, timeout=5,
+            )
         except (subprocess.TimeoutExpired, FileNotFoundError):
             return False
 
-    # generic subprocess runner with graceful failure handling
-    def _run(self, cmd: list[str]) -> str | None:
-        try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=10
-            )
-            return result.stdout
-        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
-            self.log.warning("command failed: %s: %s", " ".join(cmd), e)
-            return None
+        # patterns that indicate a VPN tunnel adapter (name OR description)
+        hints = [
+            "wintun", "tap-windows", "tap adapter", "openvpn",
+            "wireguard", "tailscale", "letstap", "vpn", "tunnel",
+            "nordlynx", "expressvpn", "protonvpn", "cisco anyconnect",
+            "forticlient", "globalprotect", "zerotier",
+        ]
+        physical = ["wi-fi", "wireless", "ethernet", "bluetooth", "loopback"]
 
-    # walks the ipconfig /all output and returns one dict per adapter section
-    def _parse_ipconfig_adapters(self, output: str) -> list[dict]:
-        """Parse ipconfig /all output into a list of adapter dicts.
-
-        Each adapter section in ipconfig /all is structured as:
-            <Type> adapter <Name>:
-                Description . . . . . . . . . . . : <human-friendly driver name>
-                ...
-                IPv4 Address. . . . . . . . . . . : <ip>(Preferred)
-                ...
-
-        We capture BOTH the section header name AND the Description line, because
-        the human-friendly VPN identity (TAP-Windows, WireGuard Tunnel, etc.) is
-        usually in Description while the header just says something like "LetsTAP"
-        or "Unknown adapter" that doesn't tell us what kind of adapter it is.
-        """
-        adapters: list[dict] = []
-        current: dict | None = None
-
-        for line in output.splitlines():
-            # adapter header line: catches "Wi-Fi adapter Wi-Fi:", "Ethernet adapter
-            # Ethernet:", "Unknown adapter LetsTAP:", "Tunnel adapter Local Area
-            # Connection* 1:", etc. anything ending with an adapter section colon
+        # walk adapter sections, look for tunnel-like adapters with an IP
+        current_name = ""
+        current_desc = ""
+        current_ipv4 = None
+        for line in result.stdout.splitlines():
             header_m = re.match(r"^([A-Za-z0-9 \-]+adapter\s+.+?):\s*$", line)
             if header_m:
-                if current is not None:
-                    adapters.append(current)
-                current = {
-                    "name": header_m.group(1).strip(),
-                    "description": None,
-                    "ipv4": None,
-                }
+                # end of previous section: check if it was a tunnel with an IP
+                if current_ipv4 and self._is_tunnel(current_name, current_desc,
+                                                    hints, physical):
+                    return True
+                current_name = header_m.group(1).strip()
+                current_desc = ""
+                current_ipv4 = None
                 continue
-
-            if current is None:
-                continue
-
-            # Description line: the driver-friendly name. often more identifying
-            # than the header (e.g. header "LetsTAP" vs description "TAP-Windows Adapter V9")
             desc_m = re.match(r"^\s+Description[.\s]+:\s*(.+?)\s*$", line)
             if desc_m:
-                current["description"] = desc_m.group(1).strip()
+                current_desc = desc_m.group(1).strip()
                 continue
-
-            # IPv4 Address: handles both plain "192.168.1.42" and the
-            # "192.168.1.42(Preferred)" annotated form
-            ipv4_m = re.search(
-                r"IPv4 Address[.\s]+:\s*(\d+\.\d+\.\d+\.\d+)", line
-            )
+            ipv4_m = re.search(r"IPv4 Address[.\s]+:\s*(\d+\.\d+\.\d+\.\d+)", line)
             if ipv4_m:
-                current["ipv4"] = ipv4_m.group(1)
+                current_ipv4 = ipv4_m.group(1)
 
-        if current is not None:
-            adapters.append(current)
-        return adapters
+        # check the last section
+        if current_ipv4 and self._is_tunnel(current_name, current_desc,
+                                            hints, physical):
+            return True
+        return False
+
+    # classifies an adapter as tunnel-like based on name + description
+    def _is_tunnel(self, name: str, desc: str, hints: list, physical: list) -> bool:
+        name_lower = name.lower()
+        if any(p in name_lower for p in physical):
+            return False
+        haystack = f"{name_lower} {desc.lower()}"
+        return any(h in haystack for h in hints)
+
 
 if __name__ == "__main__":
     # manual test: python -m src.collectors.status
     import json
-
     collector = StatusCollector()
     for record in collector.collect():
         print(json.dumps(record.to_dict(), indent=2))

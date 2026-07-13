@@ -95,32 +95,20 @@ class DashboardAPI:
             print(f"[ENACT] failed to launch incident window: {e}")
             return False
     
-    # creates a synthetic critical event in the database so the alarm system
-    # picks it up naturally on its next tick. lets the user demo the emergency
-    # flow without needing to run injection scripts in a separate terminal
-    def trigger_test_incident(self) -> dict:
+    # opens the incident window in "test mode" without inserting anything into
+    # the events table. this keeps the event log clean of synthetic data while
+    # still letting users demo the full alarm-flash + incident-window UX.
+    # the incident window itself handles the -1 sentinel and renders canned content
+    def launch_test_incident(self) -> dict:
         try:
-            from src.analyzers.base import Event
-            from datetime import datetime, timezone
-            event = Event(
-                type="test_alarm",
-                severity="critical",
-                summary=("TEST · Synthetic alarm from dashboard button "
-                         "(no real anomaly)"),
-                evidence={
-                    "test": True,
-                    "note": "This event was triggered by the TRIGGER TEST "
-                            "INCIDENT button on the dashboard.",
-                    "purpose": "verifies the alarm flash and incident window "
-                               "end-to-end without a real anomaly",
-                },
-                timestamp=datetime.now(timezone.utc),
+            subprocess.Popen(
+                [sys.executable, "-m", "src.dashboard.incident", "-1"],
+                creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP
+                              if sys.platform == "win32" else 0),
             )
-            event_id = database.store_event(event)
-            return {"ok": True, "event_id": event_id}
+            return {"ok": True}
         except Exception as e:
             return {"ok": False, "error": str(e)}
-
 
 
 # the static HTML/CSS/JS that drives the dashboard. python only provides data,
@@ -607,7 +595,7 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
                  0 0 8px rgba(255, 255, 255, 0.9);
     box-shadow: 0 0 60px rgba(255, 0, 0, 0.5);
     /* discrete on/off strobe. total run: 6 iterations × 0.4s = 2.4s */
-    animation: strobe-blink 0.4s steps(1, end) 6;
+    animation: strobe-blink 0.2s steps(1, end) 4;
 }
 @keyframes strobe-blink {
     0%, 49%   { opacity: 1; visibility: visible; }
@@ -732,9 +720,90 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     text-shadow: none;
 }
 
+/* startup loading veil: hides the whole dashboard until fonts are loaded
+   and the first data tick has fired. this prevents users from seeing the
+   "wrong font before DSEG7 loads" flash of unstyled content */
+#loading-veil {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.92);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    transition: opacity 0.55s ease-out, visibility 0.55s ease-out;
+    opacity: 1;
+    visibility: visible;
+}
+#loading-veil.gone {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+#loading-veil .brand {
+    color: var(--amber-bright);
+    font-family: 'Cascadia Mono', 'Consolas', monospace;
+    font-weight: bold;
+    font-size: 28px;
+    letter-spacing: 8px;
+    text-shadow: var(--glow-amber);
+    margin-bottom: 14px;
+}
+#loading-veil .subtitle {
+    color: var(--cyan-dim);
+    font-family: 'Cascadia Mono', 'Consolas', monospace;
+    font-size: 12px;
+    letter-spacing: 3px;
+    text-shadow: var(--glow-cyan);
+    margin-bottom: 32px;
+}
+/* animated scanline: three dots that pulse in sequence for the boot animation.
+   uses staggered animation-delay to create the traveling-dot effect */
+#loading-veil .dots {
+    display: flex;
+    gap: 12px;
+}
+#loading-veil .dots span {
+    width: 10px;
+    height: 10px;
+    background: var(--amber-bright);
+    box-shadow: 0 0 12px rgba(215, 175, 0, 0.7);
+    animation: veil-dot 1.1s ease-in-out infinite;
+}
+#loading-veil .dots span:nth-child(2) { animation-delay: 0.18s; }
+#loading-veil .dots span:nth-child(3) { animation-delay: 0.36s; }
+#loading-veil .dots span:nth-child(4) { animation-delay: 0.54s; }
+#loading-veil .dots span:nth-child(5) { animation-delay: 0.72s; }
+@keyframes veil-dot {
+    0%, 100% { opacity: 0.15; transform: scale(0.8); }
+    50%      { opacity: 1.0;  transform: scale(1.15); }
+}
+#loading-veil .status {
+    margin-top: 32px;
+    color: var(--text-mute);
+    font-family: 'Cascadia Mono', 'Consolas', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-shadow: var(--glow-cyan);
+}
+
 </style>
 </head>
 <body>
+
+<!-- loading veil: covers the whole window until fonts have loaded and the
+     first data snapshot has been rendered. fades out once ready -->
+<div id="loading-veil">
+    <div class="brand">[ ENACT ]</div>
+    <div class="subtitle">NETWORK RESILIENCE TELEMETRY</div>
+    <div class="dots">
+        <span></span><span></span><span></span><span></span><span></span>
+    </div>
+    <div class="status">LOADING</div>
+</div>
 
 <div id="app">
 
@@ -890,6 +959,31 @@ const PANEL_INFO = {
         body: "Live ping latency to three public DNS resolvers: Cloudflare, Google, and Quad9. Uses ICMP echo. If the chart shows 'NO DATA · ICMP BLOCKED OR UNREACHABLE', your network drops ping packets — common with VPNs and corporate firewalls — and this specific chart can't gather data. Other collectors (DNS resolution timing, route tracing) still work under those conditions.",
     },
 };
+
+/* the veil exists purely to hide the wrong-font transitional state until our
+   web fonts finish loading. once fonts are ready, dismiss immediately —
+   telemetry can populate afterwards with its own per-panel initializing
+   messages, which are more diagnostically useful than a global veil */
+function hideVeil() {
+    const veil = document.getElementById("loading-veil");
+    if (veil) veil.classList.add("gone");
+}
+
+function setVeilStatus(text) {
+    const el = document.getElementById("loading-veil-status");
+    if (el) el.textContent = text;
+}
+
+if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(hideVeil);
+} else {
+    // very old browsers without the fonts API, dismiss immediately
+    hideVeil();
+}
+
+/* fallback: if fonts never load (blocked CDN, offline), give up waiting
+   after 4 seconds and dismiss anyway. fallback Cascadia Mono is fine */
+setTimeout(hideVeil, 4000);
 
 /* convert an ISO timestamp to a short "X ago" string */
 function ago(isoTs) {
@@ -1051,15 +1145,14 @@ function renderStatus(status) {
         }
     }
 
-    // internet: four possible states, each honest about what's actually broken
+    // internet: honest TCP-probe result. no more "degraded" ambiguity —
+    // either the probe reaches the public internet or it doesn't
     const inet = status.internet_status;
     const inetBox = document.getElementById("status-internet");
     if (inet) {
         const map = {
-            "ok":       { cls: "ok",       label: "ONLINE",   sub: "DNS + ping ok" },
-            "degraded": { cls: "degraded", label: "DEGRADED", sub: "ICMP blocked (DNS ok)" },
-            "no_dns":   { cls: "degraded", label: "NO DNS",   sub: "IP reachable, DNS broken" },
-            "down":     { cls: "bad",      label: "OFFLINE",  sub: "no DNS, no route" },
+            "ok":   { cls: "ok",  label: "ONLINE",  sub: "TCP probe reached public internet" },
+            "down": { cls: "bad", label: "OFFLINE", sub: "TCP probes to 1.1.1.1 and 8.8.8.8 failed" },
         };
         const info = map[inet.value] || { cls: "na", label: "UNKNOWN", sub: inet.value };
         inetBox.className = `status-box ${info.cls}`;
@@ -1067,28 +1160,28 @@ function renderStatus(status) {
         inetBox.querySelector(".sub").textContent = info.sub;
     }
 
-    // vpn: connected or not. we deliberately don't try to identify the vendor
+    // vpn: honest active-probe result. distinguishes "adapter says up but
+    // tunnel actually broken" from real tunneled state, which was the whole
+    // point of the redesign
     const vpn = status.vpn_status;
     const vpnBox = document.getElementById("status-vpn");
     if (vpn) {
-        if (vpn.value === "connected") {
-            vpnBox.className = "status-box ok";
-            vpnBox.querySelector(".value").textContent = "TUNNELED";
-            const count = vpn.meta.count || 1;
-            const first = (vpn.meta.adapters || [])[0];
-            const detail = first
-                ? `${count} adapter${count > 1 ? 's' : ''} · ${first.name}`
-                : `${count} active adapter${count > 1 ? 's' : ''}`;
-            vpnBox.querySelector(".sub").textContent = detail;
-        } else if (vpn.value === "none") {
-            vpnBox.className = "status-box na";
-            vpnBox.querySelector(".value").textContent = "NOT ACTIVE";
-            vpnBox.querySelector(".sub").textContent = "no tunnel detected";
-        } else {
-            vpnBox.className = "status-box na";
-            vpnBox.querySelector(".value").textContent = "UNKNOWN";
-            vpnBox.querySelector(".sub").textContent = vpn.value || "unavailable";
-        }
+        const map = {
+            "connected":  { cls: "ok", label: "TUNNELED",
+                            sub: "tunnel active, target reachable via VPN" },
+            "not_needed": { cls: "ok", label: "DIRECT",
+                            sub: "target reachable without tunnel" },
+            "broken":     { cls: "bad", label: "BROKEN",
+                            sub: "adapter up but tunnel not delivering" },
+            "none":       { cls: "na", label: "NOT ACTIVE",
+                            sub: "no tunnel active" },
+            "unknown":    { cls: "na", label: "UNKNOWN",
+                            sub: "no internet, VPN state indeterminable" },
+        };
+        const info = map[vpn.value] || { cls: "na", label: "UNKNOWN", sub: vpn.value };
+        vpnBox.className = `status-box ${info.cls}`;
+        vpnBox.querySelector(".value").textContent = info.label;
+        vpnBox.querySelector(".sub").textContent = info.sub;
     }
 }
 
@@ -1169,6 +1262,23 @@ function classifyChartState(snapshot) {
 
     // real fresh data exists, hide the overlay
     overlay.classList.add("hidden");
+}
+
+async function tickSnapshot() {
+    try {
+        const snap = await window.pywebview.api.get_snapshot();
+
+        // each renderer wrapped so one throwing doesn't stop the others.
+        // this is defensive: individual renderers may fail on unexpected
+        // data shapes, but the dashboard should stay useful in aggregate
+        try { renderStatus(snap.status); }        catch (e) { console.error("renderStatus:", e); }
+        try { renderHealth(snap.collector_health); } catch (e) { console.error("renderHealth:", e); }
+        try { renderMetrics(snap.current_metrics); } catch (e) { console.error("renderMetrics:", e); }
+        try { renderEvents(snap.events); }        catch (e) { console.error("renderEvents:", e); }
+        try { classifyChartState(snap); }         catch (e) { console.error("classify:", e); }
+    } catch (e) {
+        console.error("tickSnapshot fetch failed:", e);
+    }
 }
 
 /* minimal HTML escaping for dynamic content. summaries can contain anything */
@@ -1353,30 +1463,47 @@ function initInfoButtons() {
     });
 }
 
-/* wire the TRIGGER TEST INCIDENT button. calls into python to insert a
-   synthetic critical event, which the alarm watcher then picks up naturally
-   on its next tick (~2s). same code path as a real event */
+/* wire the TRIGGER TEST INCIDENT button. fires the strobe flash locally and
+   launches the incident window with a sentinel event id, without touching
+   the events table. an in-flight flag prevents duplicate launches from
+   fast double-clicks or focus/keyboard dispatch races */
+let testAlarmInFlight = false;
+
 function initTestAlarmButton() {
     const btn = document.getElementById("test-alarm-btn");
     if (!btn) return;
     btn.addEventListener("click", async () => {
+        // hard guard: if a test launch is already running, ignore additional
+        // clicks. btn.disabled alone isn't enough because focus/keyboard events
+        // can slip through before the first async iteration completes
+        if (testAlarmInFlight) return;
+        testAlarmInFlight = true;
         btn.disabled = true;
         btn.textContent = "TRIGGERING...";
+
+        // pass launchIncident=false because we launch the test incident
+        // ourselves right after this via launch_test_incident(). without this,
+        // triggerAlarm would ALSO try to launch, giving us two windows
+        triggerAlarm({
+            id: -1,
+            type: "test_incident",
+            summary: "TEST · Synthetic incident from dashboard button",
+        }, false);
+
         try {
-            const result = await window.pywebview.api.trigger_test_incident();
+            const result = await window.pywebview.api.launch_test_incident();
             if (!result || !result.ok) {
                 btn.textContent = "TEST FAILED";
-                setTimeout(() => {
-                    btn.textContent = "TRIGGER TEST INCIDENT";
-                    btn.disabled = false;
-                }, 2000);
-                return;
             }
-        } catch (e) { /* ignore */ }
-        // reset the button after a short cooldown so users don't spam it
+        } catch (e) { /* ignore, alarm still fires locally */ }
+
+        // 3-second cooldown before the button can be pressed again. long
+        // enough that the incident window is fully open, short enough that
+        // impatient testing still feels responsive
         setTimeout(() => {
             btn.textContent = "TRIGGER TEST INCIDENT";
             btn.disabled = false;
+            testAlarmInFlight = false;
         }, 3000);
     });
 }
@@ -1421,9 +1548,11 @@ async function tickAlarmWatcher() {
     }
 }
 
-/* shows the alarm overlay, waits for the flash animation, then launches
-   the incident window and hides the overlay */
-async function triggerAlarm(event) {
+/* shows the strobing alarm overlay for the event, and optionally launches
+   the associated incident window mid-flash. the launchIncident parameter
+   lets callers who launch the incident window themselves (e.g. the test
+   button) skip the built-in launch, preventing duplicate windows */
+async function triggerAlarm(event, launchIncident = true) {
     if (alarmShowing) return;
     alarmShowing = true;
 
@@ -1431,16 +1560,17 @@ async function triggerAlarm(event) {
     document.getElementById("alarm-overlay-summary").textContent =
         `${event.type.toUpperCase()} · ${event.summary}`;
     overlay.classList.remove("hidden");
-    // restart the strobe animation by cloning the class off/on the child
     const strobe = overlay.querySelector(".alarm-strobe");
     strobe.style.animation = "none";
     void strobe.offsetWidth;
     strobe.style.animation = "";
 
-    // launch the incident window mid-flash so it appears just as the flash ends
-    setTimeout(() => {
-        window.pywebview.api.launch_incident_window(event.id);
-    }, 1500);
+    if (launchIncident) {
+        // launch the incident window mid-flash so it appears just as the flash ends
+        setTimeout(() => {
+            window.pywebview.api.launch_incident_window(event.id);
+        }, 1500);
+    }
 
     // hide the overlay after animation completes
     setTimeout(() => {

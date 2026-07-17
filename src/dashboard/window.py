@@ -17,6 +17,7 @@ import subprocess
 import sys
 import webview
 
+from datetime import datetime
 from src.storage import database
 
 
@@ -95,6 +96,133 @@ class DashboardAPI:
             print(f"[ENACT] failed to launch incident window: {e}")
             return False
     
+    # returns recent critical events for the incident log picker, so users
+    # can reopen the incident window for a past event they've closed
+    def get_recent_critical_events(self, limit: int = 30) -> list[dict]:
+        rows = database.new_critical_events_since(-1)
+        # newest first, cap to the requested limit
+        rows.reverse()
+        return rows[:limit]
+    
+    # generates a plaintext export of everything the user might want for
+    # post-mortem review or bug reports. bounded in size, not a raw DB dump.
+    # writes to a file the user picks via the pywebview save dialog
+    def export_logs(self) -> dict:
+        try:
+            report = self._build_report()
+
+            # ask pywebview to show a native "Save As..." dialog
+            default_name = (
+                f"enact-report-"
+                f"{datetime.now().strftime('%Y%m%d-%H%M%S')}.txt"
+            )
+            windows = webview.windows
+            if not windows:
+                return {"ok": False, "error": "no window available"}
+            path = windows[0].create_file_dialog(
+                webview.SAVE_DIALOG,
+                save_filename=default_name,
+                file_types=("Text file (*.txt)", "All files (*.*)"),
+            )
+            if not path:
+                # user cancelled the dialog
+                return {"ok": True, "cancelled": True}
+
+            # pywebview may return a tuple depending on backend, normalize
+            if isinstance(path, (list, tuple)):
+                path = path[0]
+
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(report)
+            return {"ok": True, "path": str(path), "bytes": len(report)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    # builds the plaintext report, bounded so it doesn't grow unbounded
+    # even on long-running sessions. structured with a header, event log,
+    # current metrics snapshot, and recent sample tails per collector
+    def _build_report(self) -> str:
+        from io import StringIO
+        buf = StringIO()
+
+        def section(title: str) -> None:
+            buf.write("\n")
+            buf.write("=" * 70 + "\n")
+            buf.write(title + "\n")
+            buf.write("=" * 70 + "\n")
+
+        # header
+        buf.write("ENACT · Engine for Network Anomaly, Condition, and Telemetry\n")
+        buf.write("Diagnostic report\n")
+        buf.write(f"Generated: {datetime.now().isoformat(timespec='seconds')}\n")
+
+        # current state snapshot
+        section("CURRENT STATUS")
+        try:
+            status = database.status_snapshot()
+            for metric_name, entry in status.items():
+                value = entry.get("value", "?")
+                ts = entry.get("ts", "?")
+                buf.write(f"  {metric_name:20s} = {str(value):20s} (as of {ts})\n")
+        except Exception as e:
+            buf.write(f"  (status snapshot failed: {e})\n")
+
+        # collector health
+        section("COLLECTOR HEALTH · MOST RECENT CYCLE")
+        try:
+            for row in database.latest_run_per_collector():
+                buf.write(f"  {row['collector']:15s} "
+                         f"status={row['status']:6s} "
+                         f"dur={row['duration_ms']:>6.0f}ms "
+                         f"samples={row['sample_count']} "
+                         f"at {row['ts']}\n")
+        except Exception as e:
+            buf.write(f"  (collector health query failed: {e})\n")
+
+        # current metric snapshots
+        section("CURRENT METRIC READINGS")
+        try:
+            for row in database.latest_metric_snapshots():
+                val = row["value"] if row["value"] is not None else row["value_str"]
+                buf.write(f"  {row['collector']:15s} "
+                         f"{row['metric']:25s} = {str(val):20s} "
+                         f"({row['ts']})\n")
+        except Exception as e:
+            buf.write(f"  (metric snapshot query failed: {e})\n")
+
+        # event log: last 200 events (bounded)
+        section("EVENT LOG · MOST RECENT 200 EVENTS")
+        try:
+            events = database.recent_events(limit=200)
+            if not events:
+                buf.write("  (no events recorded)\n")
+            for e in events:
+                buf.write(f"[{e['ts']}] {e['severity'].upper():8s} "
+                         f"{e['type']:20s} :: {e['summary']}\n")
+        except Exception as e:
+            buf.write(f"  (event log query failed: {e})\n")
+
+        # recent samples tail per collector: last 50 rows each, so the report
+        # gives context on what was happening without dumping everything
+        section("RECENT SAMPLES · LAST 50 PER COLLECTOR")
+        try:
+            for collector in ["connectivity", "dns", "route",
+                              "wifi", "status"]:
+                buf.write(f"\n-- {collector.upper()} --\n")
+                rows = database.recent_samples(collector, limit=50)
+                if not rows:
+                    buf.write("  (no recent samples)\n")
+                    continue
+                for r in rows:
+                    val = r["value"] if r["value"] is not None else r["value_str"]
+                    buf.write(f"  {r['ts']} {r['metric']:25s} = "
+                             f"{str(val):15s}\n")
+        except Exception as e:
+            buf.write(f"  (recent samples query failed: {e})\n")
+
+        section("END OF REPORT")
+        return buf.getvalue()
+
     # opens the incident window in "test mode" without inserting anything into
     # the events table. this keeps the event log clean of synthetic data while
     # still letting users demo the full alarm-flash + incident-window UX.
@@ -243,18 +371,18 @@ html, body {
     font-weight: bold;
     padding: 4px 8px;
     letter-spacing: 0.5px;
-    font-size: 30px;
+    font-size: 23px;
 }
 #header .subtitle {
     color: var(--amber);
     font-weight: bold;
     letter-spacing: 1px;
-    font-size: 24px;
+    font-size: 23px;
 }
 #header .date {
     color: var(--cyan);
     margin-left: auto;
-    font-size: 20px;
+    font-size: 19px;
 }
 
 /* clock panel: large numeric readout, label above */
@@ -658,6 +786,124 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     text-shadow: none;
 }
 
+/* small button in a panel title bar, for actions like reopening incidents.
+   same visual language as the acknowledged / info buttons */
+.panel-title-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1px 8px;
+    margin-left: 8px;
+    background: transparent;
+    color: var(--red);
+    border: 1px solid var(--red);
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    cursor: pointer;
+    pointer-events: auto;
+    transition: all 0.12s ease;
+    text-shadow: var(--glow-red);
+    vertical-align: middle;
+}
+.panel-title-btn:hover {
+    background: var(--red);
+    color: black;
+    text-shadow: none;
+}
+
+/* export button gets amber styling to distinguish from the red incident button.
+   still uses the same "hover turns red" language as everything else */
+.panel-title-btn.export-btn {
+    color: var(--amber);
+    border-color: var(--amber);
+    text-shadow: var(--glow-amber);
+}
+.panel-title-btn.export-btn:hover {
+    background: var(--red);
+    color: black;
+    border-color: var(--red);
+    text-shadow: none;
+}
+
+/* incident log popup: modal listing past critical events, click one to
+   reopen its incident window */
+#incident-log-popup {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.65);
+    z-index: 850;
+}
+#incident-log-popup.hidden { display: none; }
+#incident-log-popup .card {
+    width: 720px;
+    max-width: 82vw;
+    max-height: 78vh;
+    background: var(--bg-panel);
+    border: 3px solid var(--red);
+    padding: 22px 28px 18px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 0 60px rgba(0, 0, 0, 0.9),
+                0 0 24px rgba(255, 48, 48, 0.30);
+}
+#incident-log-popup .title {
+    color: var(--red-bright);
+    font-weight: bold;
+    letter-spacing: 2px;
+    font-size: 14px;
+    margin-bottom: 4px;
+    text-shadow: var(--glow-red);
+}
+#incident-log-popup .subtitle {
+    color: var(--text-mute);
+    font-size: 11px;
+    letter-spacing: 1px;
+    margin-bottom: 14px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(255, 48, 48, 0.3);
+    text-shadow: var(--glow-cyan);
+}
+#incident-log-popup .list {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 100px;
+    margin-bottom: 14px;
+}
+#incident-log-popup .list::-webkit-scrollbar { width: 6px; }
+#incident-log-popup .list::-webkit-scrollbar-thumb { background: rgba(255, 48, 48, 0.25); }
+#incident-log-popup .incident-row {
+    display: grid;
+    grid-template-columns: 90px 130px 1fr auto;
+    gap: 10px;
+    align-items: center;
+    padding: 8px 10px;
+    border: 1px solid rgba(255, 48, 48, 0.15);
+    margin-bottom: 6px;
+    cursor: pointer;
+    transition: all 0.12s ease;
+    text-shadow: var(--glow-red);
+}
+#incident-log-popup .incident-row:hover {
+    background: rgba(255, 48, 48, 0.08);
+    border-color: var(--red);
+}
+#incident-log-popup .incident-row .ts { color: var(--cyan); font-size: 11px; text-shadow: var(--glow-cyan); }
+#incident-log-popup .incident-row .type { color: var(--amber); font-weight: bold; text-shadow: var(--glow-amber); }
+#incident-log-popup .incident-row .summary { color: var(--red-bright); font-size: 12px; }
+#incident-log-popup .incident-row .reopen { color: var(--red); font-size: 10px; letter-spacing: 1px; font-weight: bold; }
+#incident-log-popup .empty {
+    color: var(--text-mute);
+    text-align: center;
+    padding: 30px;
+    letter-spacing: 2px;
+    text-shadow: var(--glow-cyan);
+}
+
 /* centered popup card that appears when an info button is clicked.
    modal-style with a dimmed backdrop, click-outside dismisses */
 #info-popup {
@@ -700,6 +946,7 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     display: flex;
     justify-content: flex-end;
 }
+
 .info-close-btn {
     background: transparent;
     color: var(--amber);
@@ -871,7 +1118,7 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
 
         <!-- bottom-left: event log -->
         <div class="panel">
-            <span class="panel-title">[ EVENT LOG ] <button class="info-btn" data-info="events">i</button></span>
+            <span class="panel-title">[ EVENT LOG ] <button class="info-btn" data-info="events">i</button> <button class="panel-title-btn" id="incident-log-btn">◆ INCIDENTS</button> <button class="panel-title-btn export-btn" id="export-logs-btn">⇩ EXPORT</button></span>
             <div class="scroll-area">
                 <table id="tbl-events">
                     <thead><tr>
@@ -912,6 +1159,19 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
         <div class="alarm-info">
             <div class="summary" id="alarm-overlay-summary"></div>
             <div class="launch">LAUNCHING INCIDENT REPORT...</div>
+        </div>
+    </div>
+
+    <!-- incident log popup: browsable history of past critical events.
+         click any row to reopen its incident window -->
+    <div id="incident-log-popup" class="hidden">
+        <div class="card">
+            <div class="title">◆ INCIDENT LOG</div>
+            <div class="subtitle">RECENT CRITICAL EVENTS · CLICK TO REOPEN</div>
+            <div class="list" id="incident-log-list"></div>
+            <div class="btn-row">
+                <button class="info-close-btn" id="incident-log-close">CLOSE</button>
+            </div>
         </div>
     </div>
 
@@ -997,6 +1257,38 @@ function ago(isoTs) {
     return Math.floor(secs / 86400) + "d";
 }
 
+/* wire the EXPORT button. requests a plaintext dump of everything relevant
+   (events, current state, recent samples) from python, which prompts the
+   user with a Save As dialog and writes to the chosen file */
+function initExportButton() {
+    const btn = document.getElementById("export-logs-btn");
+    if (!btn) return;
+    btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = "GENERATING...";
+        try {
+            const result = await window.pywebview.api.export_logs();
+            if (result && result.ok) {
+                if (result.cancelled) {
+                    btn.textContent = originalText;
+                } else {
+                    btn.textContent = "SAVED";
+                    setTimeout(() => { btn.textContent = originalText; }, 1600);
+                }
+            } else {
+                btn.textContent = "EXPORT FAILED";
+                setTimeout(() => { btn.textContent = originalText; }, 2000);
+            }
+        } catch (err) {
+            btn.textContent = "EXPORT FAILED";
+            setTimeout(() => { btn.textContent = originalText; }, 2000);
+        }
+        btn.disabled = false;
+    });
+}
+
 /* format a numeric value compactly: floats get one decimal, ints stay whole */
 function formatValue(v) {
     if (v === null || v === undefined) return "—";
@@ -1004,6 +1296,76 @@ function formatValue(v) {
         return Number.isInteger(v) ? v.toString() : v.toFixed(1);
     }
     return String(v);
+}
+
+/* formats an ISO timestamp as MM-DD HH:MM for the incident log rows */
+function formatCompactTime(isoTs) {
+    const d = new Date(isoTs);
+    if (isNaN(d)) return "?";
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mi = String(d.getMinutes()).padStart(2, "0");
+    return `${mm}-${dd} ${hh}:${mi}`;
+}
+
+/* wire the INCIDENTS button in the event log panel. opens a modal listing
+   past critical events, click any row to relaunch its incident window */
+function initIncidentLogButton() {
+    const btn = document.getElementById("incident-log-btn");
+    if (!btn) return;
+    const popup = document.getElementById("incident-log-popup");
+    const list = document.getElementById("incident-log-list");
+
+    btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        // fetch the list of past critical events fresh on each open
+        try {
+            const events = await window.pywebview.api.get_recent_critical_events(30);
+            renderIncidentList(events);
+        } catch (err) {
+            list.innerHTML = `<div class="empty">FAILED TO LOAD INCIDENT HISTORY</div>`;
+        }
+        popup.classList.remove("hidden");
+    });
+    document.getElementById("incident-log-close").addEventListener("click", () => {
+        popup.classList.add("hidden");
+    });
+    popup.addEventListener("click", (e) => {
+        if (e.target.id === "incident-log-popup") popup.classList.add("hidden");
+    });
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") popup.classList.add("hidden");
+    });
+}
+
+/* renders the incident log list, with each row a click-to-reopen button */
+function renderIncidentList(events) {
+    const list = document.getElementById("incident-log-list");
+    if (!events || events.length === 0) {
+        list.innerHTML = `<div class="empty">NO CRITICAL EVENTS RECORDED YET</div>`;
+        return;
+    }
+    list.innerHTML = events.map(ev => `
+        <div class="incident-row" data-event-id="${ev.id}">
+            <div class="ts">${formatCompactTime(ev.ts)}</div>
+            <div class="type">${escapeHtml((ev.type || "").toUpperCase())}</div>
+            <div class="summary">${escapeHtml(ev.summary || "")}</div>
+            <div class="reopen">REOPEN ▶</div>
+        </div>
+    `).join("");
+
+    // wire click handlers
+    list.querySelectorAll(".incident-row").forEach(row => {
+        row.addEventListener("click", () => {
+            const eventId = parseInt(row.dataset.eventId, 10);
+            if (isNaN(eventId)) return;
+            try {
+                window.pywebview.api.launch_incident_window(eventId);
+            } catch (e) { /* ignore */ }
+            document.getElementById("incident-log-popup").classList.add("hidden");
+        });
+    });
 }
 
 /* short day and month abbreviations for the header date. arrays are indexed by
@@ -1514,6 +1876,8 @@ function bootUiOnly() {
     setTimeout(initChart, 200);
     initInfoButtons();  
     initTestAlarmButton();
+    initIncidentLogButton(); 
+    initExportButton();
 }
 
 /* watermark for the alarm system: only fire for events strictly newer than this.

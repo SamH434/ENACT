@@ -1,10 +1,5 @@
 <p align="left">
   <img src="docs/assets/ENACTLogoWeb.png" alt="ENACT logo" width="300">
-
-</p>
-
-<p align="left">
-  <img src="docs/assets/ENACTLogoWeb.png" alt="ENACT logo" width="300">
 </p>
 
 <p align="left">

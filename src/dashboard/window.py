@@ -440,8 +440,8 @@ html, body {
 }
 .footer-btn {
     background: transparent;
-    color: var(--amber);
-    border: 2px solid var(--amber);
+    color: var(--cyan);
+    border: 2px solid var(--cyan);
     padding: 4px 14px;
     font-family: inherit;
     font-size: 10px;
@@ -449,7 +449,7 @@ html, body {
     letter-spacing: 2px;
     cursor: pointer;
     transition: all 0.12s ease;
-    text-shadow: var(--glow-amber);
+    text-shadow: var(--glow-cyan);
 }
 .footer-btn:hover {
     background: var(--red);
@@ -765,8 +765,8 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     height: 16px;
     margin-left: 8px;
     background: transparent;
-    color: var(--amber);
-    border: 1px solid var(--amber);
+    color: var(--cyan);
+    border: 1px solid var(--cyan);
     border-radius: 50%;
     font-family: inherit;
     font-size: 10px;
@@ -777,7 +777,7 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     vertical-align: middle;
     pointer-events: auto;
     transition: all 0.12s ease;
-    text-shadow: var(--glow-amber);
+    text-shadow: var(--glow-cyan);
 }
 .info-btn:hover {
     background: var(--red);
@@ -816,9 +816,9 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
 /* export button gets amber styling to distinguish from the red incident button.
    still uses the same "hover turns red" language as everything else */
 .panel-title-btn.export-btn {
-    color: var(--amber);
-    border-color: var(--amber);
-    text-shadow: var(--glow-amber);
+    color: var(--cyan);
+    border-color: var(--cyan);
+    text-shadow: var(--glow-cyan);
 }
 .panel-title-btn.export-btn:hover {
     background: var(--red);

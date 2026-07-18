@@ -612,8 +612,25 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     overflow-y: auto;
     min-height: 0;
 }
-.scroll-area::-webkit-scrollbar { width: 6px; }
-.scroll-area::-webkit-scrollbar-thumb { background: var(--cyan-mute); }
+/* scrollbar styling: high-contrast so it's actually visible against the dark
+   theme. track gets a border to define the channel, thumb is bright cyan */
+.scroll-area::-webkit-scrollbar {
+    width: 10px;
+}
+.scroll-area::-webkit-scrollbar-track {
+    background: rgba(0, 175, 255, 0.08);
+    border: 1px solid rgba(0, 175, 255, 0.25);
+}
+.scroll-area::-webkit-scrollbar-thumb {
+    background: var(--cyan);
+    border: 1px solid var(--cyan-dim);
+    box-shadow: 0 0 6px rgba(0, 175, 255, 0.5);
+}
+.scroll-area::-webkit-scrollbar-thumb:hover {
+    background: var(--amber-bright);
+    border-color: var(--amber);
+    box-shadow: 0 0 8px rgba(255, 176, 0, 0.6);
+}
 
 /* connectivity status column: three vertical status boxes on the left of the
    body grid. spans both rows of the 2x2 to its right, so it's a tall column

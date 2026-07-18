@@ -5,9 +5,6 @@ Formula:
     baseline = median of the last N RSSI samples
     degraded = current RSSI is at least N dB below baseline AND
                current RSSI is below an absolute "concerning" threshold
-
-RSSI lives in negative dBm: -30 is excellent (close to AP), -90 is marginal
-(barely connected). Drops are measured in absolute dB, not as a ratio
 """
 
 import json
@@ -18,22 +15,16 @@ from src.analyzers.base import Analyzer, Event
 from src.storage import database
 
 
-# tunables: conservative defaults sized for typical home/office Wifi
 LOOKBACK_LIMIT = 100              # how many recent wifi samples to inspect
-BASELINE_MIN_SAMPLES = 5          # don't fire until we have at least this much data
+BASELINE_MIN_SAMPLES = 5       
 RSSI_DROP_DB = 15                 # how many dB below baseline counts as degraded
 CONCERNING_RSSI_DBM = -70         # current must be at or below this to fire
 EVIDENCE_WINDOW_SEC = 60          # window for cross-signal evidence
-EVENT_DEBOUNCE_SEC = 120          # don't re-fire the same degradation
+EVENT_DEBOUNCE_SEC = 120  
 
 
 """
 Detects Wifi degradation by comparing current RSSI against a rolling baseline.
-
-Reads recent current_rssi_dbm samples, computes a median baseline, fires
-when the most recent reading has dropped at least RSSI_DROP_DB below baseline
-AND is below the CONCERNING_RSSI_DBM floor. Includes a debounce so one
-sustained degradation produces one event, not a flood.
 """
 class WifiDegradationAnalyzer(Analyzer):
     name = "wifi_degradation"
@@ -41,35 +32,25 @@ class WifiDegradationAnalyzer(Analyzer):
     # runs one analysis pass: check current RSSI against rolling baseline
     def run(self) -> list[Event]:
         events: list[Event] = []
-
-        # pull recent wifi samples, newest first. We ask for plenty because
-        # the wifi collector emits many records per cycle (one per nearby AP
-        # plus connection records), but we only care about current_rssi_dbm
         rows = database.recent_samples("wifi", limit=LOOKBACK_LIMIT)
         rssi_rows = [r for r in rows if r["metric"] == "current_rssi_dbm"
                      and r["value"] is not None]
 
         if len(rssi_rows) < BASELINE_MIN_SAMPLES + 1:
-            # not enough data, also covers the "host on Ethernet" case
-            # where current_rssi_dbm records never get produced
             return events
 
-        # newest first: current is rssi_rows[0], baseline from the rest
         current = rssi_rows[0]
         baseline_values = [r["value"] for r in rssi_rows[1:BASELINE_MIN_SAMPLES + 1]]
         baseline_dbm = median(baseline_values)
         current_dbm = current["value"]
 
-        # how far below baseline are we? positive number = degradation
         drop_db = baseline_dbm - current_dbm
 
-        # both conditions must hold: meaningful drop AND below concerning floor
         if drop_db < RSSI_DROP_DB:
             return events
         if current_dbm > CONCERNING_RSSI_DBM:
             return events
-
-        # debounce: don't re-fire if we already flagged this degradation recently
+    
         if self._recently_fired():
             self.log.debug("RSSI dropped %.0f dB but debounced", drop_db)
             return events
@@ -122,7 +103,6 @@ class WifiDegradationAnalyzer(Analyzer):
 
         window_rows = database.samples_in_window(window_start, window_end)
 
-        # bucket samples by collector for cross-signal context
         by_collector: dict[str, list] = {}
         for r in window_rows:
             meta = json.loads(r["meta_json"]) if r["meta_json"] else {}

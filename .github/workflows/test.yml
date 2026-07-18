@@ -1,0 +1,57 @@
+# GitHub Actions CI for ENACT
+#
+# Runs the pytest suite on every push and pull request. Uses Ubuntu because
+# GitHub's Windows runners are much slower and our tests are OS-agnostic
+# (parser fixtures are captured text, subprocess calls are mocked). The tests
+# never touch the real network, real filesystem, or real subprocess output.
+#
+# If tests fail here, the build status badge in the README turns red.
+
+name: tests
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # cache pip downloads so subsequent runs don't re-download everything.
+      # keyed on the requirements.txt hash so a dep change busts the cache
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # pywebview drags in some GTK requirements on Linux that we don't need
+      # since we're not launching a window in CI. install with a fallback so
+      # missing GTK doesn't fail the build — the tests don't need the GUI
+      - name: Install pywebview-lite for CI
+        run: pip install pywebview || echo "pywebview install failed, tests should still pass"
+        continue-on-error: true
+
+      - name: Run pytest
+        run: pytest tests/ -v --tb=short

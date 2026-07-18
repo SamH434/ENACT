@@ -3,6 +3,17 @@
 
 </p>
 
+<p align="left">
+  <img src="docs/assets/ENACTLogoWeb.png" alt="ENACT logo" width="300">
+</p>
+
+<p align="left">
+  <img src="https://github.com/SamH434/ENACT/actions/workflows/test.yml/badge.svg" alt="tests status">
+  <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+">
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License">
+  <img src="https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey" alt="Windows 10/11">
+</p>
+
 # ENACT (Engine for Network Anomaly, Condition, and Telemetry)
 
 ENACT is a lightweight Python-based network observability and telemetry platform that uses correlation-aware observability for anomaly detection. Each telemetry cycle is tagged with a shared correlation_id, allowing signals from all collectors to be analyzed as a unified observation window rather than isolated timelines. This enables the analyzer and dashboard layers to surface ranked, cross-signal anomalies with supporting evidence.

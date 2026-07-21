@@ -25,7 +25,6 @@ from src.utils.records import TelemetryRecord
 
 log = get_logger("enact.storage")
 
-# database lives in data/ at the project root
 DB_PATH = Path(__file__).resolve().parents[2] / "data" / "enact.db"
 
 # schema as plain SQL. executed once on startup; "IF NOT EXISTS" makes it idempotent
@@ -81,10 +80,7 @@ def init_db() -> None:
 def _connect() -> sqlite3.Connection:
     """Open a connection. WAL mode lets reads and writes coexist better."""
     conn = sqlite3.connect(DB_PATH, timeout=10)
-    # WAL = write-ahead logging. lets the dashboard read while collectors write
-    # without them blocking each other as much. good default for this pattern
     conn.execute("PRAGMA journal_mode=WAL")
-    # rows come back as dict-like objects instead of bare tuples, easier to read
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -97,9 +93,6 @@ def store_records(records: list[TelemetryRecord]) -> int:
 
     rows = []
     for r in records:
-        # numeric values go in `value`, strings (like route fingerprints) go in
-        # `value_str`. keeping them in separate typed columns makes later queries
-        # cleaner than cramming everything into one TEXT column
         is_numeric = isinstance(r.value, (int, float)) and not isinstance(r.value, bool)
         rows.append((
             r.timestamp.isoformat(),
@@ -149,8 +142,6 @@ def store_event(event_type: str, severity: str, summary: str,
             (timestamp.isoformat(), event_type, severity, summary,
              json.dumps(evidence)),
         )
-
-# ---------- query helpers (used by dashboard + analyzers later) ----------
 
 # fetches recent samples for one collector, newest first
 def recent_samples(collector: str, limit: int = 200) -> list[sqlite3.Row]:
@@ -206,8 +197,6 @@ def recent_events(limit: int = 100) -> list[sqlite3.Row]:
 def latest_run_per_collector() -> list[sqlite3.Row]:
     """One row per collector: most recent cycle's ts, status, duration, sample_count."""
     with _connect() as conn:
-        # this CTE picks the highest id per collector in the runs table.
-        # last id = most recent insertion, which is what we want for "last cycle"
         cur = conn.execute(
             """
             WITH latest AS (
@@ -223,11 +212,9 @@ def latest_run_per_collector() -> list[sqlite3.Row]:
         )
         return cur.fetchall()
 
-# fetches the three status readouts as a single dict, ready for the dashboard.
-# the status collector produces these once per cycle and we want the newest
-# of each, this helper keeps the dashboard code simple
+# fetches the three status readouts as a single dict, ready for the dashboard
 def status_snapshot() -> dict:
-    """Most recent status readouts (wifi, internet, vpn) as a plain dict."""
+    """Most recent status readouts (wifi, internet, vpn, firewall)."""
     with _connect() as conn:
         cur = conn.execute(
             """
@@ -236,7 +223,7 @@ def status_snapshot() -> dict:
                        ROW_NUMBER() OVER (PARTITION BY metric
                                           ORDER BY ts DESC) AS rn
                 FROM samples
-                WHERE collector = 'status'
+                WHERE collector IN ('status', 'firewall')
             )
             SELECT * FROM ranked WHERE rn = 1
             """
@@ -245,8 +232,9 @@ def status_snapshot() -> dict:
     out = {}
     for r in rows:
         meta = json.loads(r["meta_json"]) if r["meta_json"] else {}
+        val = r["value"] if r["value"] is not None else r["value_str"]
         out[r["metric"]] = {
-            "value": r["value_str"],
+            "value": val,
             "ts": r["ts"],
             "meta": meta,
         }
@@ -289,7 +277,7 @@ def latency_history(target: str, minutes: int = 60) -> list[float]:
             """,
             (cutoff,),
         )
-        # filter by target inside python since target lives in JSON metadata
+
         rows = cur.fetchall()
         values: list[float] = []
         for r in rows:
@@ -318,7 +306,7 @@ def latency_history_multi(targets: list[str], minutes: int = 30
             (cutoff,),
         )
         rows = cur.fetchall()
-    # partition by target. each target gets a list of (timestamp, value) pairs
+
     out: dict[str, list[tuple[str, float]]] = {t: [] for t in targets}
     for r in rows:
         meta = json.loads(r["meta_json"]) if r["meta_json"] else {}
@@ -393,7 +381,7 @@ def samples_around_event(event_id: int, seconds_before: int = 60,
         return {}
     event_ts = datetime.fromisoformat(event["ts"])
     window_start = event_ts - timedelta(seconds=seconds_before)
-    window_end = datetime.now(timezone.utc)  # "now" so the window grows live
+    window_end = datetime.now(timezone.utc) 
     if window_end > event_ts + timedelta(seconds=seconds_after):
         window_end = event_ts + timedelta(seconds=seconds_after)
 

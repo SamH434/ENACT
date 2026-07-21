@@ -54,6 +54,7 @@ the analyzer layer via time-window bucketing.
 | route | 300s | `tracert` hop chain, hop count, path fingerprint | Detects path changes, which are usually benign but occasionally diagnostic |
 | wifi | 120s | Current RSSI, link rate, association state, nearby AP inventory | Wireless-layer visibility, where physical problems originate |
 | status | 15s | Wi-Fi association, composite internet reachability, VPN adapter presence | Fast "is the network working right now" readouts for the dashboard |
+| firewall | 60s | Windows Defender Firewall state per profile (Domain/Private/Public), inbound/outbound defaults | Detects local security posture changes |
 
 **A note on cadences.** The rates were chosen to balance data density with
 system load and to match the natural rate-of-change of the underlying signal.
@@ -235,6 +236,32 @@ Wi-Fi can degrade without the user losing connectivity.
 degrades AND ping latency spikes AND DNS starts failing, that combination
 points at a specific cause (weak Wi-Fi) and warrants critical severity as
 a compound event. This is the natural next step of the correlation model.
+
+### 4.5 firewall_disabled
+
+**Watches:** firewall collector's `firewall_profile_state` metric.
+
+**Rule:** For each of the three profiles (Domain, Private, Public), compare
+the two most recent samples. Fire a warning event on the specific ON → OFF
+transition. Per-profile debounce prevents re-firing during a sustained-off
+state.
+
+**Current thresholds:**
+- `LOOKBACK_LIMIT`: 40 samples
+- `EVENT_DEBOUNCE_SEC`: 300 (5 minutes)
+- **Severity: `warning`**
+
+**Honesty check:** `warning` is correct here. A disabled firewall profile is a
+real posture change worth investigation but not an immediate outage — the
+machine still functions. Escalating to `critical` would be alarm noise, since
+disabled firewall doesn't mean anything is wrong *right now*, only that the
+machine has reduced defense-in-depth. The operator's expected response is
+"investigate: was this deliberate, Group Policy, or something else?"
+
+**Potential improvement (deferred to v2):** Detect Group Policy-driven changes
+specifically. Right now the analyzer doesn't distinguish operator-initiated
+disables from GP-driven disables from malicious disables. A stronger signal
+would correlate with recent GP application events.
 
 ---
 

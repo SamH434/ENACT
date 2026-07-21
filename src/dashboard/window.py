@@ -638,7 +638,7 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
 #status-strip {
     grid-row: 1 / -1;              /* span all rows of #body */
     display: grid;
-    grid-template-rows: 1fr 1fr 1fr;
+    grid-template-rows: 1fr 1fr 1fr 1fr;
     gap: 12px;
     padding: 18px 12px 12px;
     border: 2px solid var(--amber);
@@ -663,7 +663,7 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     margin-bottom: 4px;
 }
 .status-box .value {
-    font-size: 20px;
+    font-size: 18px;
     font-weight: bold;
     letter-spacing: 1px;
     color: var(--amber-bright);
@@ -1104,6 +1104,11 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
             </div>
             <div class="status-box na" id="status-vpn">
                 <div class="label">VPN</div>
+                <div class="value">—</div>
+                <div class="sub">initializing</div>
+            </div>
+            <div class="status-box na" id="status-firewall">
+                <div class="label">FIREWALL</div>
                 <div class="value">—</div>
                 <div class="sub">initializing</div>
             </div>
@@ -1561,6 +1566,33 @@ function renderStatus(status) {
         vpnBox.className = `status-box ${info.cls}`;
         vpnBox.querySelector(".value").textContent = info.label;
         vpnBox.querySelector(".sub").textContent = info.sub;
+    }
+
+    // firewall: reads the firewall_summary metric which is enabled-profile count.
+    // 3 = fully enabled (green), 1-2 = partial (yellow), 0 = fully disabled (red)
+    const fw = status.firewall_summary;
+    const fwBox = document.getElementById("status-firewall");
+    if (fw && fwBox) {
+        const enabled = fw.meta && fw.meta.enabled_count;
+        const total = fw.meta && fw.meta.total_profiles;
+        if (enabled === undefined || enabled === null) {
+            fwBox.className = "status-box na";
+            fwBox.querySelector(".value").textContent = "UNKNOWN";
+            fwBox.querySelector(".sub").textContent = "unavailable";
+        } else if (enabled === total) {
+            fwBox.className = "status-box ok";
+            fwBox.querySelector(".value").textContent = "ACTIVE";
+            fwBox.querySelector(".sub").textContent = `all ${total} profiles enabled`;
+        } else if (enabled === 0) {
+            fwBox.className = "status-box bad";
+            fwBox.querySelector(".value").textContent = "DISABLED";
+            fwBox.querySelector(".sub").textContent = "no profiles enabled";
+        } else {
+            fwBox.className = "status-box degraded";
+            fwBox.querySelector(".value").textContent = "PARTIAL";
+            fwBox.querySelector(".sub").textContent =
+                `${enabled}/${total} profiles enabled`;
+        }
     }
 }
 

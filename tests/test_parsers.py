@@ -171,3 +171,118 @@ class TestStatusCollectorTunnelDetection:
             desc="Some VPN-branded Wi-Fi driver",
             hints=["vpn"], physical=["wi-fi"],
         ) is False
+
+# captured 'netsh advfirewall show allprofiles' output for a healthy machine
+NETSH_ADVFIREWALL_ALL_ENABLED = """
+Domain Profile Settings:
+----------------------------------------------------------------------
+State                                 ON
+Firewall Policy                       BlockInbound,AllowOutbound
+LocalFirewallRules                    N/A
+LocalConSecRules                      N/A
+
+Private Profile Settings:
+----------------------------------------------------------------------
+State                                 ON
+Firewall Policy                       BlockInbound,AllowOutbound
+LocalFirewallRules                    N/A
+
+Public Profile Settings:
+----------------------------------------------------------------------
+State                                 ON
+Firewall Policy                       BlockInbound,AllowOutbound
+LocalFirewallRules                    N/A
+"""
+
+NETSH_ADVFIREWALL_PUBLIC_DISABLED = """
+Domain Profile Settings:
+----------------------------------------------------------------------
+State                                 ON
+Firewall Policy                       BlockInbound,AllowOutbound
+
+Private Profile Settings:
+----------------------------------------------------------------------
+State                                 ON
+Firewall Policy                       BlockInbound,AllowOutbound
+
+Public Profile Settings:
+----------------------------------------------------------------------
+State                                 OFF
+Firewall Policy                       BlockInbound,AllowOutbound
+"""
+
+
+class TestFirewallCollectorParsing:
+
+    def test_parses_all_three_profiles(self):
+        """Every profile with a State line shows up in the parsed output."""
+        from src.collectors.firewall import FirewallCollector
+
+        collector = FirewallCollector()
+        profiles = collector._parse_profiles(NETSH_ADVFIREWALL_ALL_ENABLED)
+
+        assert set(profiles.keys()) == {"Domain", "Private", "Public"}
+        assert profiles["Domain"]["state"] == "ON"
+        assert profiles["Private"]["state"] == "ON"
+        assert profiles["Public"]["state"] == "ON"
+
+    def test_parses_mixed_states(self):
+        """Correctly reports Public OFF while Domain and Private are ON."""
+        from src.collectors.firewall import FirewallCollector
+
+        collector = FirewallCollector()
+        profiles = collector._parse_profiles(NETSH_ADVFIREWALL_PUBLIC_DISABLED)
+
+        assert profiles["Domain"]["state"] == "ON"
+        assert profiles["Private"]["state"] == "ON"
+        assert profiles["Public"]["state"] == "OFF"
+
+    def test_parses_firewall_policy(self):
+        """Extracts BlockInbound/AllowOutbound from the policy line."""
+        from src.collectors.firewall import FirewallCollector
+
+        collector = FirewallCollector()
+        profiles = collector._parse_profiles(NETSH_ADVFIREWALL_ALL_ENABLED)
+
+        assert profiles["Domain"]["inbound"] == "BlockInbound"
+        assert profiles["Domain"]["outbound"] == "AllowOutbound"
+
+    def test_collect_emits_summary_record(self, monkeypatch):
+        """collect() produces a firewall_summary record with enabled count."""
+        from src.collectors.firewall import FirewallCollector
+        import subprocess
+
+        class FakeResult:
+            stdout = NETSH_ADVFIREWALL_ALL_ENABLED
+        monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
+
+        records = FirewallCollector().collect()
+        summary_records = [r for r in records if r.metric == "firewall_summary"]
+        assert len(summary_records) == 1
+        assert summary_records[0].value == 3
+
+    def test_collect_summary_reflects_partial_disable(self, monkeypatch):
+        """One profile disabled -> summary count is 2 out of 3."""
+        from src.collectors.firewall import FirewallCollector
+        import subprocess
+
+        class FakeResult:
+            stdout = NETSH_ADVFIREWALL_PUBLIC_DISABLED
+        monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
+
+        records = FirewallCollector().collect()
+        summary = next(r for r in records if r.metric == "firewall_summary")
+        assert summary.value == 2
+
+    def test_collect_returns_unavailable_when_netsh_fails(self, monkeypatch):
+        """If netsh isn't available, we get an unavailable record, not a crash."""
+        from src.collectors.firewall import FirewallCollector
+        import subprocess
+
+        def fake_run(*a, **kw):
+            raise FileNotFoundError("netsh not found")
+        monkeypatch.setattr(subprocess, "run", fake_run)
+
+        records = FirewallCollector().collect()
+        assert len(records) == 1
+        assert records[0].metadata.get("unavailable") is True

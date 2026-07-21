@@ -279,3 +279,102 @@ class TestWifiDegradationAnalyzer:
         assert len(events) == 1
         assert events[0].severity == "warning"
         assert events[0].type == "wifi_degradation"
+
+class TestFirewallDisabledAnalyzer:
+    """
+    Fires warning on ON -> OFF transition of any firewall profile.
+    """
+
+    def test_no_event_when_all_profiles_stay_on(self, temp_db, make_record):
+        """Consistent ON state across multiple cycles: no event."""
+        from src.storage import database
+        from src.analyzers.firewall_disabled import FirewallDisabledAnalyzer
+
+        now = datetime.now(timezone.utc)
+        records = []
+        for i in range(6):
+            for profile in ["Domain", "Private", "Public"]:
+                records.append(make_record(
+                    collector="firewall", metric="firewall_profile_state",
+                    value="ON",
+                    metadata={"profile": profile, "enabled": True},
+                    timestamp=now - timedelta(seconds=60 * i),
+                ))
+        database.store_records(records)
+
+        events = FirewallDisabledAnalyzer().run()
+        assert events == []
+
+    def test_fires_warning_on_on_to_off_transition(self, temp_db, make_record):
+        """Public profile flips ON -> OFF: warning event fired."""
+        from src.storage import database
+        from src.analyzers.firewall_disabled import FirewallDisabledAnalyzer
+
+        now = datetime.now(timezone.utc)
+        # previous cycle: Public was ON
+        previous = make_record(
+            collector="firewall", metric="firewall_profile_state",
+            value="ON",
+            metadata={"profile": "Public", "enabled": True},
+            timestamp=now - timedelta(seconds=60),
+        )
+        # current cycle: Public is OFF
+        current = make_record(
+            collector="firewall", metric="firewall_profile_state",
+            value="OFF",
+            metadata={"profile": "Public", "enabled": False},
+            timestamp=now,
+        )
+        database.store_records([previous, current])
+
+        events = FirewallDisabledAnalyzer().run()
+        assert len(events) == 1
+        assert events[0].severity == "warning"
+        assert events[0].type == "firewall_disabled"
+        assert "Public" in events[0].summary
+
+    def test_no_event_when_off_to_on(self, temp_db, make_record):
+        """OFF -> ON is a good thing, not something to alarm on."""
+        from src.storage import database
+        from src.analyzers.firewall_disabled import FirewallDisabledAnalyzer
+
+        now = datetime.now(timezone.utc)
+        previous = make_record(
+            collector="firewall", metric="firewall_profile_state",
+            value="OFF",
+            metadata={"profile": "Public", "enabled": False},
+            timestamp=now - timedelta(seconds=60),
+        )
+        current = make_record(
+            collector="firewall", metric="firewall_profile_state",
+            value="ON",
+            metadata={"profile": "Public", "enabled": True},
+            timestamp=now,
+        )
+        database.store_records([previous, current])
+
+        events = FirewallDisabledAnalyzer().run()
+        assert events == []
+
+    def test_no_event_when_staying_off(self, temp_db, make_record):
+        """
+        If a profile was OFF and stays OFF, we don't re-fire — the previous
+        transition already generated the event when it first happened.
+        """
+        from src.storage import database
+        from src.analyzers.firewall_disabled import FirewallDisabledAnalyzer
+
+        now = datetime.now(timezone.utc)
+        records = [
+            make_record(
+                collector="firewall", metric="firewall_profile_state",
+                value="OFF",
+                metadata={"profile": "Public", "enabled": False},
+                timestamp=now - timedelta(seconds=60 * i),
+            )
+            for i in range(4)
+        ]
+        database.store_records(records)
+
+        events = FirewallDisabledAnalyzer().run()
+        assert events == []

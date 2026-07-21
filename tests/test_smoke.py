@@ -22,6 +22,8 @@ ALL_MODULES = [
     "src.analyzers.route_change",
     "src.analyzers.wifi_degradation",
     "src.scheduler",
+    "src.collectors.firewall",
+    "src.analyzers.firewall_disabled",
 ]
 
 
@@ -52,9 +54,10 @@ def test_all_collectors_instantiable():
     from src.collectors.route import RouteCollector
     from src.collectors.wifi import WifiCollector
     from src.collectors.status import StatusCollector
+    from src.collectors.firewall import FirewallCollector
 
     for cls in [ConnectivityCollector, DNSCollector, RouteCollector,
-                WifiCollector, StatusCollector]:
+                WifiCollector, StatusCollector, FirewallCollector]:
         instance = cls()
         assert instance.name, f"{cls.__name__} has no name attribute"
 
@@ -65,9 +68,10 @@ def test_all_analyzers_instantiable():
     from src.analyzers.dns_outage import DNSOutageAnalyzer
     from src.analyzers.route_change import RouteChangeAnalyzer
     from src.analyzers.wifi_degradation import WifiDegradationAnalyzer
+    from src.analyzers.firewall_disabled import FirewallDisabledAnalyzer
 
     for cls in [LatencySpikeAnalyzer, DNSOutageAnalyzer,
-                RouteChangeAnalyzer, WifiDegradationAnalyzer]:
+                RouteChangeAnalyzer, WifiDegradationAnalyzer, FirewallDisabledAnalyzer]:
         instance = cls()
         assert instance.name, f"{cls.__name__} has no name attribute"
 

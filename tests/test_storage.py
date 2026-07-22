@@ -97,7 +97,6 @@ class TestSamplesInWindow:
         assert len(rows) == 3
 
     def test_returns_across_collectors(self, temp_db, make_record):
-        """The window query pulls from ALL collectors, not one — that's the point."""
         from src.storage import database
 
         now = datetime.now(timezone.utc)

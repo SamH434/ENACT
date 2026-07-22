@@ -48,7 +48,7 @@ jobs:
 
       # pywebview drags in some GTK requirements on Linux that we don't need
       # since we're not launching a window in CI. install with a fallback so
-      # missing GTK doesn't fail the build — the tests don't need the GUI
+      # missing GTK doesn't fail the build (the tests don't need the GUI)
       - name: Install pywebview-lite for CI
         run: pip install pywebview || echo "pywebview install failed, tests should still pass"
         continue-on-error: true

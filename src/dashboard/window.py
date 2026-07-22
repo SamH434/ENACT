@@ -80,14 +80,11 @@ class DashboardAPI:
         return database.new_critical_events_since(since_id)
 
     # spawns the incident window as its own subprocess so it lives on its own
-    # event loop, independent of this dashboard. returns True on launch, False
-    # on failure. failure is not fatal for the main dashboard
+    # event loop, independent of this dashboard.
     def launch_incident_window(self, event_id: int) -> bool:
         try:
-            # use the same Python interpreter that's running this dashboard
             subprocess.Popen(
                 [sys.executable, "-m", "src.dashboard.incident", str(event_id)],
-                # detach on Windows so the child survives if we close later
                 creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP
                               if sys.platform == "win32" else 0),
             )
@@ -100,18 +97,15 @@ class DashboardAPI:
     # can reopen the incident window for a past event they've closed
     def get_recent_critical_events(self, limit: int = 30) -> list[dict]:
         rows = database.new_critical_events_since(-1)
-        # newest first, cap to the requested limit
         rows.reverse()
         return rows[:limit]
     
     # generates a plaintext export of everything the user might want for
-    # post-mortem review or bug reports. bounded in size, not a raw DB dump.
-    # writes to a file the user picks via the pywebview save dialog
+    # review or bug reports.
     def export_logs(self) -> dict:
         try:
             report = self._build_report()
 
-            # ask pywebview to show a native "Save As..." dialog
             default_name = (
                 f"enact-report-"
                 f"{datetime.now().strftime('%Y%m%d-%H%M%S')}.txt"
@@ -125,10 +119,8 @@ class DashboardAPI:
                 file_types=("Text file (*.txt)", "All files (*.*)"),
             )
             if not path:
-                # user cancelled the dialog
                 return {"ok": True, "cancelled": True}
 
-            # pywebview may return a tuple depending on backend, normalize
             if isinstance(path, (list, tuple)):
                 path = path[0]
 
@@ -137,6 +129,244 @@ class DashboardAPI:
             return {"ok": True, "path": str(path), "bytes": len(report)}
         except Exception as e:
             return {"ok": False, "error": str(e)}
+
+    # generates an SVG topology diagram from route collector data and prompts
+    # the user to save it.
+    def export_topology(self) -> dict:
+        try:
+            svg = self._build_topology_svg()
+
+            default_name = (
+                f"enact-topology-"
+                f"{datetime.now().strftime('%Y%m%d-%H%M%S')}.svg"
+            )
+            windows = webview.windows
+            if not windows:
+                return {"ok": False, "error": "no window available"}
+            path = windows[0].create_file_dialog(
+                webview.SAVE_DIALOG,
+                save_filename=default_name,
+                file_types=("SVG image (*.svg)", "All files (*.*)"),
+            )
+            if not path:
+                return {"ok": True, "cancelled": True}
+            if isinstance(path, (list, tuple)):
+                path = path[0]
+
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(svg)
+            return {"ok": True, "path": str(path), "bytes": len(svg)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    # builds an SVG topology diagram from the route collector's recent samples.
+    # renders as a horizontal chain: host -> gateway -> intermediate hops ->
+    # reachability target. one row per target. bounded in width so it prints.
+    def _build_topology_svg(self) -> str:
+        import socket
+
+        hostname = socket.gethostname()
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        gateway = self._get_current_gateway()
+
+        targets_data = self._get_route_topology()
+
+        if not targets_data:
+            return self._empty_topology_svg(hostname, now_str)
+
+        NODE_W = 130
+        NODE_H = 40
+        H_GAP = 24
+        V_GAP = 60
+        LEFT_MARGIN = 30
+        TOP_MARGIN = 80
+
+        max_hops = max(len(t["hops"]) for t in targets_data) if targets_data else 0
+        chain_len = 2 + max_hops + 1
+        diagram_w = LEFT_MARGIN * 2 + chain_len * NODE_W + (chain_len - 1) * H_GAP
+        diagram_h = TOP_MARGIN + len(targets_data) * V_GAP + 80
+
+        parts = [self._svg_header(diagram_w, diagram_h, hostname, now_str)]
+
+        for row_idx, tdata in enumerate(targets_data):
+            y = TOP_MARGIN + row_idx * V_GAP
+            self._render_target_row(parts, tdata, gateway, hostname,
+                                    LEFT_MARGIN, y, NODE_W, NODE_H, H_GAP,
+                                    max_hops)
+
+        parts.append(self._svg_legend(LEFT_MARGIN, TOP_MARGIN + len(targets_data)
+                                       * V_GAP + 30))
+        parts.append("</svg>")
+        return "\n".join(parts)
+
+    # fetches the most recent gateway address the status collector observed
+    def _get_current_gateway(self) -> str:
+        try:
+            snap = database.status_snapshot()
+            wifi = snap.get("wifi_status", {})
+            gateway = wifi.get("meta", {}).get("gateway")
+            return gateway if gateway else "gateway"
+        except Exception:
+            return "gateway"
+
+    # returns a list of {target, hops, hop_count, last_ts, fingerprint} dicts
+    # for each reachability target with recent route data
+    def _get_route_topology(self) -> list[dict]:
+        rows = database.recent_samples("route", limit=200)
+        by_target: dict = {}
+        for r in rows:
+            if r["metric"] != "route_fingerprint":
+                continue
+            meta_raw = r["meta_json"]
+            if not meta_raw:
+                continue
+            try:
+                meta = json.loads(meta_raw)
+            except Exception:
+                continue
+            target = meta.get("target")
+            if not target:
+                continue
+            if target not in by_target:
+                by_target[target] = {
+                    "target": target,
+                    "hops": meta.get("hops", []) or [],
+                    "hop_count": meta.get("hop_count", 0),
+                    "last_ts": r["ts"],
+                    "fingerprint": r["value_str"],
+                }
+        return list(by_target.values())
+
+    # SVG document header with title, timestamp, styles
+    def _svg_header(self, w: int, h: int, hostname: str, ts: str) -> str:
+        return f"""<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="{w}" height="{h}" viewBox="0 0 {w} {h}"
+     font-family="Consolas, 'Cascadia Mono', monospace">
+  <style>
+    .bg {{ fill: #000000; }}
+    .title {{ fill: #ffb000; font-size: 16px; font-weight: bold; }}
+    .subtitle {{ fill: #5a7e8a; font-size: 11px; }}
+    .node-host {{ fill: #0a0a0a; stroke: #00afff; stroke-width: 2; }}
+    .node-gateway {{ fill: #0a0a0a; stroke: #ffb000; stroke-width: 2; }}
+    .node-hop {{ fill: #050505; stroke: #5a7e8a; stroke-width: 1.5; }}
+    .node-target {{ fill: #0a0a0a; stroke: #5fcf5f; stroke-width: 2; }}
+    .label {{ font-size: 11px; fill: #d7af00; text-anchor: middle; }}
+    .label-host {{ fill: #00afff; }}
+    .label-hop {{ fill: #5a7e8a; font-size: 10px; }}
+    .label-target {{ fill: #5fcf5f; }}
+    .conn {{ stroke: #5a7e8a; stroke-width: 1.5; fill: none; }}
+    .legend-title {{ fill: #ffb000; font-size: 11px; font-weight: bold; }}
+    .legend-item {{ fill: #d7af00; font-size: 10px; }}
+  </style>
+  <rect class="bg" width="{w}" height="{h}" />
+  <text class="title" x="30" y="30">ENACT · Network Topology</text>
+  <text class="subtitle" x="30" y="50">host {hostname}  ·  captured {ts}</text>
+"""
+
+    # renders one row of the diagram: host -> gateway -> hops -> target
+    def _render_target_row(self, parts: list, tdata: dict, gateway: str,
+                           hostname: str, x0: int, y: int, w: int, h: int,
+                           gap: int, max_hops: int) -> None:
+        # position in x: host at column 0, gateway at 1, hops at 2..N, target at N+1
+        def col_x(col: int) -> int:
+            return x0 + col * (w + gap)
+
+        chain = [
+            {"label": hostname[:14], "cls": "node-host", "text_cls": "label-host"},
+            {"label": gateway, "cls": "node-gateway", "text_cls": "label"},
+        ]
+        for hop in tdata["hops"][:max_hops]:
+            hop_label = self._hop_label(hop)
+            chain.append({
+                "label": hop_label, "cls": "node-hop", "text_cls": "label-hop",
+            })
+        while len(chain) < 2 + max_hops:
+            chain.append(None)
+        chain.append({
+            "label": tdata["target"], "cls": "node-target",
+            "text_cls": "label-target",
+        })
+
+        for i in range(len(chain) - 1):
+            a, b = chain[i], chain[i + 1]
+            if a is None or b is None:
+                continue
+            x1 = col_x(i) + w
+            x2 = col_x(i + 1)
+            cy = y + h // 2
+            parts.append(
+                f'  <line class="conn" x1="{x1}" y1="{cy}" '
+                f'x2="{x2}" y2="{cy}" />'
+            )
+
+        for i, node in enumerate(chain):
+            if node is None:
+                continue
+            nx = col_x(i)
+            parts.append(
+                f'  <rect class="{node["cls"]}" x="{nx}" y="{y}" '
+                f'width="{w}" height="{h}" rx="2" />'
+            )
+            parts.append(
+                f'  <text class="label {node["text_cls"]}" '
+                f'x="{nx + w // 2}" y="{y + h // 2 + 4}">'
+                f'{self._escape_xml(node["label"])}</text>'
+            )
+
+    # compact label for a hop: prefer IP, fall back to whatever's present
+    def _hop_label(self, hop) -> str:
+        if isinstance(hop, dict):
+            ip = hop.get("ip") or hop.get("host") or "*"
+            return ip[:14]
+        return str(hop)[:14]
+
+    # legend rendered at the bottom of the diagram
+    def _svg_legend(self, x: int, y: int) -> str:
+        return f"""  <text class="legend-title" x="{x}" y="{y}">LEGEND</text>
+  <rect class="node-host" x="{x}" y="{y + 8}" width="14" height="14" />
+  <text class="legend-item" x="{x + 20}" y="{y + 20}">this host</text>
+  <rect class="node-gateway" x="{x + 100}" y="{y + 8}" width="14" height="14" />
+  <text class="legend-item" x="{x + 120}" y="{y + 20}">default gateway</text>
+  <rect class="node-hop" x="{x + 240}" y="{y + 8}" width="14" height="14" />
+  <text class="legend-item" x="{x + 260}" y="{y + 20}">intermediate hop</text>
+  <rect class="node-target" x="{x + 400}" y="{y + 8}" width="14" height="14" />
+  <text class="legend-item" x="{x + 420}" y="{y + 20}">reachability target</text>
+  <text class="subtitle" x="{x}" y="{y + 45}">
+    Diagram reflects observed routes at capture time.
+    Route paths change over time; see docs/OPERATIONS.md.
+  </text>
+"""
+
+    # produces a minimal "no data yet" diagram when route collector has no samples
+    def _empty_topology_svg(self, hostname: str, ts: str) -> str:
+        return f"""<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="200" viewBox="0 0 600 200"
+     font-family="Consolas, monospace">
+  <rect fill="#000000" width="600" height="200" />
+  <text fill="#ffb000" font-size="16" font-weight="bold" x="30" y="30">
+    ENACT · Network Topology
+  </text>
+  <text fill="#5a7e8a" font-size="11" x="30" y="50">
+    host {hostname}  ·  captured {ts}
+  </text>
+  <text fill="#ff3030" font-size="14" font-weight="bold" x="30" y="110">
+    NO ROUTE DATA AVAILABLE YET
+  </text>
+  <text fill="#5a7e8a" font-size="11" x="30" y="130">
+    The route collector runs every 300 seconds. Run ENACT for at least
+  </text>
+  <text fill="#5a7e8a" font-size="11" x="30" y="145">
+    5-10 minutes so route samples accumulate, then re-export.
+  </text>
+</svg>
+"""
+
+    # minimal XML escape for user data going into SVG text elements
+    def _escape_xml(self, s: str) -> str:
+        return (str(s).replace("&", "&amp;").replace("<", "&lt;")
+                .replace(">", "&gt;").replace('"', "&quot;"))
 
     # builds the plaintext report, bounded so it doesn't grow unbounded
     # even on long-running sessions. structured with a header, event log,

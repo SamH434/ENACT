@@ -1,4 +1,4 @@
-# ENACT — Laws of Operation
+# ENACT: Laws of Operation
 
 **Version 1.0 · 2026**
 
@@ -65,7 +65,7 @@ rest, which is the dominant use case.
 
 ---
 
-## 3. Severity levels — definitions
+## 3. Severity levels: definitions
 
 ENACT emits three severity levels. These definitions are precise on purpose;
 severity inflation destroys the value of a monitoring tool.
@@ -112,7 +112,7 @@ attention.
 completely dropped and cannot be attributed to a known filter
 (future analyzer).
 
-### The bar for `critical` — a realism note
+### The bar for `critical` (making sure things are realistic)
 
 Not every "bad reading" is a critical event. A network engineer knows that
 occasional packet loss, momentary DNS hiccups, and RSSI variance are all
@@ -150,7 +150,7 @@ noise, which is a 3x multiplier but not operationally meaningful.
 
 **Honesty check:** The `warning` severity is honest and appropriate. A 3x
 latency spike above a 100ms floor is a real deviation but does not mean the
-network is broken — most such events are single-packet queueing spikes at
+network is broken; most such events are single-packet queueing spikes at
 some intermediate hop. Escalating this to `critical` would produce alarm
 noise.
 
@@ -177,8 +177,8 @@ records indicate failed lookups.
 - `EVENT_DEBOUNCE_SEC`: 60
 
 **Honesty check:** These thresholds are defensible. A 50% failure rate
-over 40 lookups is not "one bad minute" — it's a genuine multi-minute
-resolution problem. A 90% failure rate is functionally an outage; nothing
+over 40 lookups is not "one bad minute" (genuine multi-minute
+resolution problem). A 90% failure rate is functionally an outage; nothing
 resolves. `critical` is the honest severity for the 90% tier.
 
 **Potential improvement (deferred to v2):** Distinguish *system-wide* DNS
@@ -200,7 +200,7 @@ prevents multi-firing when the tracert re-runs.
 
 **Honesty check:** This is correct. Route changes on the public internet are
 constant, expected, and usually benign. BGP routes reconverge, ISPs change
-peering, CDN geolocation shifts — all routine. Elevating any single route
+peering, CDN geolocation shifts (all routine). Elevating any single route
 change to `warning` would be dishonest alarm-generation.
 
 **However**, one route pattern *is* concerning: **route flapping**, defined
@@ -228,7 +228,7 @@ is still excellent.
 
 **Honesty check:** Both thresholds are defensible. A 15 dB drop is meaningful
 (the received signal is ~32x weaker on a linear scale). The -70 dBm floor is
-the industry consensus for "connection is stable but noticeable" — below it,
+the industry consensus for "connection is stable but noticeable", below it,
 retransmissions and rate downshifts start. `warning` is correct because
 Wi-Fi can degrade without the user losing connectivity.
 
@@ -252,7 +252,7 @@ state.
 - **Severity: `warning`**
 
 **Honesty check:** `warning` is correct here. A disabled firewall profile is a
-real posture change worth investigation but not an immediate outage — the
+real posture change worth investigation but not an immediate outage; the
 machine still functions. Escalating to `critical` would be alarm noise, since
 disabled firewall doesn't mean anything is wrong *right now*, only that the
 machine has reduced defense-in-depth. The operator's expected response is
@@ -306,7 +306,7 @@ different-OUI new BSSIDs are more suspicious.
 
 Every event ENACT emits carries an `evidence` dictionary. Some of that
 evidence is intrinsic to the anomaly (the DNS failure rate, the RSSI drop
-magnitude). Some is *contextual* — a snapshot of what other collectors
+magnitude). Some is *contextual*, essentially a snapshot of what other collectors
 were reporting in the same time window.
 
 The contextual evidence is the honest answer to "what else was happening
@@ -341,7 +341,7 @@ A truthful spec includes what the tool *cannot* see.
   probes." ENACT shows this honestly via the `NO DATA · ICMP BLOCKED`
   overlay rather than pretending to have measured what it can't.
 - **Application-layer issues.** HTTPS handshake failures, TLS certificate
-  errors, application timeouts — ENACT does not measure these.
+  errors, application timeouts, ENACT does not measure these.
 - **Path issues past the first ISP hop.** `tracert` sees the visible path
   but the "why" of a route change (peering dispute, undersea cable cut,
   BGP configuration) is not observable from a single host.
@@ -386,7 +386,7 @@ Quick reference for interpreting the dashboard at a glance.
 - 90%+ of DNS lookups are failing over the last ~40 minutes.
 - Probable causes in order: resolver misconfigured, ISP DNS server down,
   DNS-over-HTTPS misroute, security appliance blocking outbound port 53.
-- Check the concurrent samples in the incident window — if connectivity
+- Check the concurrent samples in the incident window, if connectivity
   is also failing, it's a broader outage, not a DNS-specific problem.
 
 **A latency spike warning fires**
@@ -412,7 +412,7 @@ Quick reference for interpreting the dashboard at a glance.
 
 ## 8. Revision history
 
-- **v1.0 (2026)** — Initial specification. Defines the five collectors,
+- **v1.0 (2026)** : Initial specification. Defines the five collectors,
   four analyzers, three severity tiers, and the operator's playbook.
 
 Future revisions should preserve the "honesty check" pattern for any new

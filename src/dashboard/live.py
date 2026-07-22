@@ -298,7 +298,7 @@ def _current_network_panel() -> Panel:
         for r in rows:
             val_display = r["value"] if r["value"] is not None else r["value_str"]
             if val_display is None:
-                val_display = "—"
+                val_display = "--"
             if isinstance(val_display, float):
                 val_display = f"{val_display:.1f}"
             else:

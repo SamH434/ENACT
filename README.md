@@ -39,5 +39,5 @@ python main.py
 ```
 
 ## Documentation
-- `docs/architecture.md` — module layout and data flow
-- `docs/roadmap.md` — phase plan, includes updated planning process
+- `docs/architecture.md`: module layout and data flow
+- `docs/roadmap.md`: phase plan, includes updated planning process

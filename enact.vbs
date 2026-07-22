@@ -1,4 +1,4 @@
-' ENACT launcher — runs the engine and dashboard invisibly.
+' ENACT launcher -> runs the engine and dashboard invisibly.
 ' this VBScript wrapper is what your desktop shortcut points at. it spawns
 ' the batch file with WindowStyle 0, which means no visible cmd window.
 Set WshShell = CreateObject("WScript.Shell")

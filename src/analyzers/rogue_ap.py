@@ -97,7 +97,7 @@ class RogueAPAnalyzer(Analyzer):
             all_bssids_for_ssid = history.get(ssid, {})
             if len(all_bssids_for_ssid) <= len(current_bssids):
                 # every BSSID we've ever seen for this SSID is present in the
-                # current cycle. no history to compare against — this SSID is
+                # current cycle. no history to compare against, this SSID is
                 # brand new, not "known SSID with new BSSID"
                 continue
 

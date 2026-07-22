@@ -358,7 +358,7 @@ class TestFirewallDisabledAnalyzer:
 
     def test_no_event_when_staying_off(self, temp_db, make_record):
         """
-        If a profile was OFF and stays OFF, we don't re-fire — the previous
+        If a profile was OFF and stays OFF, we don't re-fire, the previous
         transition already generated the event when it first happened.
         """
         from src.storage import database
@@ -420,13 +420,13 @@ class TestRogueAPAnalyzer:
 
     def test_no_event_for_first_time_ssid(self, temp_db, make_record):
         """
-        A brand-new SSID we've never seen before shouldn't fire — no prior BSSIDs
+        A brand-new SSID we've never seen before shouldn't fire, no prior BSSIDs
         to compare against, so it's just "new network," not "known SSID + new BSSID."
         """
         from src.storage import database
         from src.analyzers.rogue_ap import RogueAPAnalyzer
 
-        # 25 samples of a single SSID from a single BSSID — no other history
+        # 25 samples of a single SSID from a single BSSID, no other history
         self._seed_wifi_history(database, make_record, [
             {"ssid": "BrandNewNetwork", "bssid": "aa:bb:cc:dd:ee:01"},
         ] * 25)
@@ -478,7 +478,7 @@ class TestRogueAPAnalyzer:
 
     def test_ignores_hidden_ssids(self, temp_db, make_record):
         """
-        Hidden/blank SSIDs are excluded — they don't have identity to match on.
+        Hidden/blank SSIDs are excluded, they don't have identity to match on.
         """
         from src.storage import database
         from src.analyzers.rogue_ap import RogueAPAnalyzer

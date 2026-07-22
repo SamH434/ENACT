@@ -465,7 +465,7 @@ function formatClock(isoTs) {
 
 /* format a value: floats to 1 decimal, ints raw, strings unchanged */
 function formatValue(v) {
-    if (v === null || v === undefined) return "—";
+    if (v === null || v === undefined) return "--";
     if (typeof v === "number") {
         return Number.isInteger(v) ? v.toString() : v.toFixed(1);
     }
@@ -552,7 +552,7 @@ function renderStatus(eventType, samples) {
         blocks.push({
             recovered: lat && lat.value !== null && lat.value < 50,
             label: "PING LATENCY",
-            value: lat && lat.value !== null ? `${formatValue(lat.value)} ms` : "—",
+            value: lat && lat.value !== null ? `${formatValue(lat.value)} ms` : "--",
             sub: lat ? `to ${lat.meta.target || "?"}` : "",
         });
     }

@@ -263,6 +263,43 @@ specifically. Right now the analyzer doesn't distinguish operator-initiated
 disables from GP-driven disables from malicious disables. A stronger signal
 would correlate with recent GP application events.
 
+### 4.6 rogue_ap
+
+**Watches:** wifi collector's `nearby_ap` metric.
+
+**Rule:** For each SSID, maintain a rolling 7-day history of BSSIDs observed
+advertising it. When a BSSID appears in the current wifi collector cycle for
+an SSID that has prior history from *other* BSSIDs, fire an info event.
+Per-(SSID, BSSID) debounce prevents re-firing for the same new BSSID within
+one hour.
+
+**Current thresholds:**
+- `LOOKBACK_LIMIT`: 2000 samples (~10 wifi cycles worth of nearby_ap records)
+- `BASELINE_MIN_SAMPLES`: 20 (need enough history to define "known")
+- `KNOWN_LOOKBACK_SEC`: 7 days
+- `EVENT_DEBOUNCE_SEC`: 3600 (1 hour)
+- **Severity: `info`**
+
+**Honesty check:** `info` is the honest severity. The pattern this detects
+("known SSID from new BSSID") has a substantially higher false-positive rate
+than any other analyzer in ENACT. Mesh networks, roaming, corporate
+deployments, and pop-up guest networks all produce this pattern legitimately.
+Escalating to warning would produce alarm fatigue that would poison the
+signal. Info-severity means the event is logged for later review by a human
+who can distinguish "my new mesh node came online" from "someone in the coffee
+shop is running an evil twin."
+
+**Explicitly not implemented (and shouldn't be):** active verification of
+suspected APs (probe requests, association attempts, deauth). Passive
+observation is legal and safe in every jurisdiction; active probing of
+unauthorized APs is not. This analyzer is deliberately read-only against the
+storage layer.
+
+**Potential improvement (deferred to v2):** Weight events by how similar the
+new BSSID's OUI (first three octets) is to the known BSSIDs. Same-OUI new
+BSSIDs are highly likely to be legitimate expansion of the same network;
+different-OUI new BSSIDs are more suspicious.
+
 ---
 
 ## 5. The correlation model in practice

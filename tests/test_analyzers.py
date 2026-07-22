@@ -378,3 +378,119 @@ class TestFirewallDisabledAnalyzer:
 
         events = FirewallDisabledAnalyzer().run()
         assert events == []
+
+class TestRogueAPAnalyzer:
+    """
+    Fires info event when a known SSID appears from a new BSSID.
+    """
+
+    def _seed_wifi_history(self, database, make_record, samples: list[dict],
+                           run_id: str = "run_old"):
+        """Helper: seed wifi nearby_ap records with SSID/BSSID metadata."""
+        records = []
+        now = datetime.now(timezone.utc)
+        for i, sample in enumerate(samples):
+            records.append(make_record(
+                collector="wifi", metric="nearby_ap",
+                value=sample.get("signal_dbm", -60),
+                metadata={
+                    "ssid": sample["ssid"],
+                    "bssid": sample["bssid"],
+                    "channel": sample.get("channel", 6),
+                    "signal_pct": sample.get("signal_pct", 60),
+                    "auth": sample.get("auth", "WPA2-Personal"),
+                },
+                timestamp=now - timedelta(seconds=120 * len(samples) - 120 * i),
+                run_id=sample.get("run_id", run_id),
+            ))
+        database.store_records(records)
+
+    def test_no_event_with_insufficient_history(self, temp_db, make_record):
+        """Need at least BASELINE_MIN_SAMPLES history before firing anything."""
+        from src.storage import database
+        from src.analyzers.rogue_ap import RogueAPAnalyzer
+
+        # only 5 samples: below the 20-sample minimum
+        self._seed_wifi_history(database, make_record, [
+            {"ssid": "HomeWifi", "bssid": "aa:bb:cc:dd:ee:01"},
+        ] * 5)
+
+        events = RogueAPAnalyzer().run()
+        assert events == []
+
+    def test_no_event_for_first_time_ssid(self, temp_db, make_record):
+        """
+        A brand-new SSID we've never seen before shouldn't fire — no prior BSSIDs
+        to compare against, so it's just "new network," not "known SSID + new BSSID."
+        """
+        from src.storage import database
+        from src.analyzers.rogue_ap import RogueAPAnalyzer
+
+        # 25 samples of a single SSID from a single BSSID — no other history
+        self._seed_wifi_history(database, make_record, [
+            {"ssid": "BrandNewNetwork", "bssid": "aa:bb:cc:dd:ee:01"},
+        ] * 25)
+
+        events = RogueAPAnalyzer().run()
+        assert events == []
+
+    def test_no_event_when_bssid_stays_same(self, temp_db, make_record):
+        """SSID observed consistently from the same BSSID: no anomaly."""
+        from src.storage import database
+        from src.analyzers.rogue_ap import RogueAPAnalyzer
+
+        # 25 old-run samples + 5 current-run samples, all same BSSID
+        self._seed_wifi_history(database, make_record, [
+            {"ssid": "HomeWifi", "bssid": "aa:bb:cc:dd:ee:01",
+             "run_id": "old_run"},
+        ] * 25 + [
+            {"ssid": "HomeWifi", "bssid": "aa:bb:cc:dd:ee:01",
+             "run_id": "current_run"},
+        ] * 5)
+
+        events = RogueAPAnalyzer().run()
+        assert events == []
+
+    def test_fires_info_when_known_ssid_from_new_bssid(self, temp_db, make_record):
+        """
+        History shows SSID from BSSID :01. Current cycle shows same SSID from
+        BSSID :02. Fires info event.
+        """
+        from src.storage import database
+        from src.analyzers.rogue_ap import RogueAPAnalyzer
+
+        # historical: known SSID from known BSSID
+        self._seed_wifi_history(database, make_record, [
+            {"ssid": "HomeWifi", "bssid": "aa:bb:cc:dd:ee:01",
+             "run_id": "old_run"},
+        ] * 25 + [
+            # current cycle: same SSID appears from a NEW BSSID
+            {"ssid": "HomeWifi", "bssid": "aa:bb:cc:dd:ee:99",
+             "run_id": "current_run"},
+        ])
+
+        events = RogueAPAnalyzer().run()
+        assert len(events) == 1
+        assert events[0].severity == "info"
+        assert events[0].type == "rogue_ap"
+        assert "HomeWifi" in events[0].summary
+        assert "aa:bb:cc:dd:ee:99" in events[0].summary
+
+    def test_ignores_hidden_ssids(self, temp_db, make_record):
+        """
+        Hidden/blank SSIDs are excluded — they don't have identity to match on.
+        """
+        from src.storage import database
+        from src.analyzers.rogue_ap import RogueAPAnalyzer
+
+        self._seed_wifi_history(database, make_record, [
+            {"ssid": "", "bssid": f"aa:bb:cc:dd:ee:{i:02x}",
+             "run_id": "old_run"}
+            for i in range(1, 26)
+        ] + [
+            {"ssid": "", "bssid": "aa:bb:cc:dd:ee:99",
+             "run_id": "current_run"},
+        ])
+
+        events = RogueAPAnalyzer().run()
+        assert events == []

@@ -596,7 +596,7 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     letter-spacing: 2px;
 }
 
-/* variant: initializing (softer, cyan not red) — for the first few seconds
+/* variant: initializing (softer, cyan not red) - for the first few seconds
    after the dashboard opens, before we can classify state honestly */
 #chart-nodata.initializing .headline {
     color: var(--cyan);
@@ -748,7 +748,7 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
 }
 
 /* info block below the strobing box: event summary and status. does NOT
-   strobe — it stays static and readable throughout the alarm */
+   strobe - it stays static and readable throughout the alarm */
 .alarm-info {
     margin-top: 22px;
     text-align: center;
@@ -1094,22 +1094,22 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
             <span class="panel-title">[ STATUS ] <button class="info-btn" data-info="status">i</button></span>
             <div class="status-box na" id="status-wifi">
                 <div class="label">WI-FI</div>
-                <div class="value">—</div>
+                <div class="value">-</div>
                 <div class="sub">initializing</div>
             </div>
             <div class="status-box na" id="status-internet">
                 <div class="label">INTERNET</div>
-                <div class="value">—</div>
+                <div class="value">-</div>
                 <div class="sub">initializing</div>
             </div>
             <div class="status-box na" id="status-vpn">
                 <div class="label">VPN</div>
-                <div class="value">—</div>
+                <div class="value">-</div>
                 <div class="sub">initializing</div>
             </div>
             <div class="status-box na" id="status-firewall">
                 <div class="label">FIREWALL</div>
-                <div class="value">—</div>
+                <div class="value">-</div>
                 <div class="sub">initializing</div>
             </div>
         </div>
@@ -1175,7 +1175,7 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     </div>
 
     <!-- alarm overlay: strobes the EMERGENCY word only, with static info below.
-         no full-screen tint, no fade animation — hard on/off strobe -->
+         no full-screen tint, no fade animation - hard on/off strobe -->
     <div id="alarm-overlay" class="hidden">
         <div class="alarm-strobe">EMERGENCY</div>
         <div class="alarm-info">
@@ -1201,8 +1201,8 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
          click outside or CLOSE to dismiss -->
     <div id="info-popup" class="hidden">
         <div class="card">
-            <div class="title" id="info-popup-title">—</div>
-            <div class="body" id="info-popup-body">—</div>
+            <div class="title" id="info-popup-title">-</div>
+            <div class="body" id="info-popup-body">-</div>
             <div class="btn-row">
                 <button class="info-close-btn" id="info-popup-close">CLOSE</button>
             </div>
@@ -1222,7 +1222,7 @@ const CHART_REFRESH_MS = CHART_REFRESH_MS_PLACEHOLDER;
 const PANEL_INFO = {
     status: {
         title: "CONNECTIVITY STATUS",
-        body: "Live state of your Wi-Fi association, internet reachability, and VPN tunnel. WI-FI reports the SSID you're associated with. INTERNET is a composite of DNS resolution and ICMP reachability — a 'DEGRADED' reading typically means ICMP is filtered by a firewall or VPN while DNS still works. VPN reports whether a tunnel adapter is currently active on your machine.",
+        body: "Live state of your Wi-Fi association, internet reachability, and VPN tunnel. WI-FI reports the SSID you're associated with. INTERNET is a composite of DNS resolution and ICMP reachability - a 'DEGRADED' reading typically means ICMP is filtered by a firewall or VPN while DNS still works. VPN reports whether a tunnel adapter is currently active on your machine.",
     },
     health: {
         title: "COLLECTOR HEALTH MONITOR",
@@ -1234,16 +1234,16 @@ const PANEL_INFO = {
     },
     events: {
         title: "EVENT LOG",
-        body: "Chronological log of anomalies detected by the analyzers. Severity is INFO (routine change), WARN (something notable), or CRIT (something wrong). Critical events also trigger a full-screen alarm and open a dedicated incident window. Boxed values in each summary are the diagnostic data — fingerprints, IPs, hop counts — so the eye can catch what actually changed at a glance.",
+        body: "Chronological log of anomalies detected by the analyzers. Severity is INFO (routine change), WARN (something notable), or CRIT (something wrong). Critical events also trigger a full-screen alarm and open a dedicated incident window. Boxed values in each summary are the diagnostic data - fingerprints, IPs, hop counts - so the eye can catch what actually changed at a glance.",
     },
     latency: {
         title: "LATENCY TRACE · LIVE OSCILLOSCOPE",
-        body: "Live ping latency to three public DNS resolvers: Cloudflare, Google, and Quad9. Uses ICMP echo. If the chart shows 'NO DATA · ICMP BLOCKED OR UNREACHABLE', your network drops ping packets — common with VPNs and corporate firewalls — and this specific chart can't gather data. Other collectors (DNS resolution timing, route tracing) still work under those conditions.",
+        body: "Live ping latency to three public DNS resolvers: Cloudflare, Google, and Quad9. Uses ICMP echo. If the chart shows 'NO DATA · ICMP BLOCKED OR UNREACHABLE', your network drops ping packets - common with VPNs and corporate firewalls - and this specific chart can't gather data. Other collectors (DNS resolution timing, route tracing) still work under those conditions.",
     },
 };
 
 /* the veil exists purely to hide the wrong-font transitional state until our
-   web fonts finish loading. once fonts are ready, dismiss immediately —
+   web fonts finish loading. once fonts are ready, dismiss immediately -
    telemetry can populate afterwards with its own per-panel initializing
    messages, which are more diagnostically useful than a global veil */
 function hideVeil() {
@@ -1313,7 +1313,7 @@ function initExportButton() {
 
 /* format a numeric value compactly: floats get one decimal, ints stay whole */
 function formatValue(v) {
-    if (v === null || v === undefined) return "—";
+    if (v === null || v === undefined) return "-";
     if (typeof v === "number") {
         return Number.isInteger(v) ? v.toString() : v.toFixed(1);
     }
@@ -1405,7 +1405,7 @@ function tickClock() {
     document.getElementById("clock-time").textContent = `${h}:${m}:${s}`;
     document.getElementById("clock-ms").textContent = `.${ms}`;
 
-    // format: "Tue, Jul. 7" — day abbr + comma + month abbr + period + day-of-month
+    // format: "Tue, Jul. 7" - day abbr + comma + month abbr + period + day-of-month
     const dayName = DAY_ABBR[now.getDay()];
     const monthName = MONTH_ABBR[now.getMonth()];
     const dayOfMonth = now.getDate();
@@ -1529,7 +1529,7 @@ function renderStatus(status) {
         }
     }
 
-    // internet: honest TCP-probe result. no more "degraded" ambiguity —
+    // internet: honest TCP-probe result. no more "degraded" ambiguity -
     // either the probe reaches the public internet or it doesn't
     const inet = status.internet_status;
     const inetBox = document.getElementById("status-internet");
@@ -2051,7 +2051,7 @@ def main() -> None:
 
     api = DashboardAPI()
     window = webview.create_window(
-        title="ENACT — Network Resilience Telemetry",
+        title="ENACT - Network Resilience Telemetry",
         html=html,
         js_api=api,
         width=WINDOW_WIDTH,

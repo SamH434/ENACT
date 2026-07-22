@@ -24,6 +24,7 @@ ALL_MODULES = [
     "src.scheduler",
     "src.collectors.firewall",
     "src.analyzers.firewall_disabled",
+    "src.analyzers.rogue_ap",
 ]
 
 
@@ -55,9 +56,10 @@ def test_all_collectors_instantiable():
     from src.collectors.wifi import WifiCollector
     from src.collectors.status import StatusCollector
     from src.collectors.firewall import FirewallCollector
+    from src.analyzers.rogue_ap import RogueAPAnalyzer
 
     for cls in [ConnectivityCollector, DNSCollector, RouteCollector,
-                WifiCollector, StatusCollector, FirewallCollector]:
+                WifiCollector, StatusCollector, FirewallCollector, RogueAPAnalyzer]:
         instance = cls()
         assert instance.name, f"{cls.__name__} has no name attribute"
 

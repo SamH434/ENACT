@@ -130,267 +130,6 @@ class DashboardAPI:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
-    # generates an SVG topology diagram from route collector data and prompts
-    # the user to save it.
-    def export_topology(self) -> dict:
-        try:
-            svg = self._build_topology_svg()
-
-            default_name = (
-                f"enact-topology-"
-                f"{datetime.now().strftime('%Y%m%d-%H%M%S')}.svg"
-            )
-            windows = webview.windows
-            if not windows:
-                return {"ok": False, "error": "no window available"}
-            path = windows[0].create_file_dialog(
-                webview.SAVE_DIALOG,
-                save_filename=default_name,
-                file_types=("SVG image (*.svg)", "All files (*.*)"),
-            )
-            if not path:
-                return {"ok": True, "cancelled": True}
-            if isinstance(path, (list, tuple)):
-                path = path[0]
-
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(svg)
-            return {"ok": True, "path": str(path), "bytes": len(svg)}
-        except Exception as e:
-            return {"ok": False, "error": str(e)}
-
-    # builds an SVG topology diagram from the route collector's recent samples.
-    # renders as a horizontal chain per target. caps intermediate hops at
-    # MAX_VISIBLE_HOPS to keep the diagram printable and readable
-    def _build_topology_svg(self) -> str:
-        import socket
-
-        hostname = socket.gethostname()
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        gateway = self._get_current_gateway()
-        targets_data = self._get_route_topology()
-
-        if not targets_data:
-            return self._empty_topology_svg(hostname, now_str)
-
-        # cap hop rendering: if a route has more than this many intermediate
-        # hops, we collapse the middle into "... N more ..." so the diagram
-        # stays readable at print size
-        MAX_VISIBLE_HOPS = 5
-        NODE_W = 110
-        NODE_H = 40
-        H_GAP = 20
-        V_GAP = 70
-        LEFT_MARGIN = 30
-        TOP_MARGIN = 80
-
-        for t in targets_data:
-            raw_hops = t["hops"]
-            if len(raw_hops) <= MAX_VISIBLE_HOPS:
-                t["visible_hops"] = raw_hops
-            else:
-                omitted = len(raw_hops) - 4
-                t["visible_hops"] = (
-                    raw_hops[:2]
-                    + [{"ip": f"... {omitted} more ...", "_ellipsis": True}]
-                    + raw_hops[-2:]
-                )
-
-        max_visible_hops = max(len(t["visible_hops"]) for t in targets_data)
-        # chain: host, gateway, hops, target
-        chain_len = 2 + max_visible_hops + 1
-        diagram_w = LEFT_MARGIN * 2 + chain_len * NODE_W + (chain_len - 1) * H_GAP
-        diagram_h = TOP_MARGIN + len(targets_data) * V_GAP + 110
-
-        parts = [self._svg_header(diagram_w, diagram_h, hostname, now_str)]
-
-        for row_idx, tdata in enumerate(targets_data):
-            y = TOP_MARGIN + row_idx * V_GAP
-            self._render_target_row(parts, tdata, gateway, hostname,
-                                    LEFT_MARGIN, y, NODE_W, NODE_H, H_GAP,
-                                    max_visible_hops)
-
-        parts.append(self._svg_legend(LEFT_MARGIN,
-                                       TOP_MARGIN + len(targets_data) * V_GAP + 30))
-        parts.append("</svg>")
-        return "\n".join(parts)
-
-    # fetches the most recent gateway address the status collector observed
-    def _get_current_gateway(self) -> str:
-        try:
-            snap = database.status_snapshot()
-            wifi = snap.get("wifi_status", {})
-            gateway = wifi.get("meta", {}).get("gateway")
-            return gateway if gateway else "gateway"
-        except Exception:
-            return "gateway"
-
-    # returns a list of {target, hops, hop_count, last_ts, fingerprint} dicts
-    # for each reachability target with recent route data
-    def _get_route_topology(self) -> list[dict]:
-        rows = database.recent_samples("route", limit=200)
-        by_target: dict = {}
-        for r in rows:
-            if r["metric"] != "route_fingerprint":
-                continue
-            meta_raw = r["meta_json"]
-            if not meta_raw:
-                continue
-            try:
-                meta = json.loads(meta_raw)
-            except Exception:
-                continue
-            target = meta.get("target")
-            if not target:
-                continue
-            if target not in by_target:
-                by_target[target] = {
-                    "target": target,
-                    "hops": meta.get("hops", []) or [],
-                    "hop_count": meta.get("hop_count", 0),
-                    "last_ts": r["ts"],
-                    "fingerprint": r["value_str"],
-                }
-        return list(by_target.values())
-
-    # SVG document header with title, timestamp, styles
-    def _svg_header(self, w: int, h: int, hostname: str, ts: str) -> str:
-        return f"""<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg"
-     width="{w}" height="{h}" viewBox="0 0 {w} {h}"
-     font-family="Consolas, 'Cascadia Mono', monospace">
-  <style>
-    .bg {{ fill: #000000; }}
-    .title {{ fill: #ffb000; font-size: 16px; font-weight: bold; }}
-    .subtitle {{ fill: #5a7e8a; font-size: 11px; }}
-    .node-host {{ fill: #0a0a0a; stroke: #00afff; stroke-width: 2; }}
-    .node-gateway {{ fill: #0a0a0a; stroke: #ffb000; stroke-width: 2; }}
-    .node-hop {{ fill: #050505; stroke: #5a7e8a; stroke-width: 1.5; }}
-    .node-hop-ellipsis { fill: #050505; stroke: #5a7e8a; stroke-width: 1; stroke-dasharray: 4 3; }
-    .node-target {{ fill: #0a0a0a; stroke: #5fcf5f; stroke-width: 2; }}
-    .label {{ font-size: 11px; fill: #d7af00; text-anchor: middle; }}
-    .label-host {{ fill: #00afff; }}
-    .label-hop {{ fill: #5a7e8a; font-size: 10px; }}
-    .label-target {{ fill: #5fcf5f; }}
-    .conn {{ stroke: #5a7e8a; stroke-width: 1.5; fill: none; }}
-    .legend-title {{ fill: #ffb000; font-size: 11px; font-weight: bold; }}
-    .legend-item {{ fill: #d7af00; font-size: 10px; }}
-  </style>
-  <rect class="bg" width="{w}" height="{h}" />
-  <text class="title" x="30" y="30">ENACT · Network Topology</text>
-  <text class="subtitle" x="30" y="50">host {hostname}  ·  captured {ts}</text>
-"""
-
-    # renders one row of the diagram: host -> gateway -> hops -> target
-    def _render_target_row(self, parts: list, tdata: dict, gateway: str,
-                           hostname: str, x0: int, y: int, w: int, h: int,
-                           gap: int, max_hops: int) -> None:
-        # position in x: host at column 0, gateway at 1, hops at 2..N, target at N+1
-        def col_x(col: int) -> int:
-            return x0 + col * (w + gap)
-
-        chain = [
-            {"label": hostname[:14], "cls": "node-host", "text_cls": "label-host"},
-            {"label": gateway, "cls": "node-gateway", "text_cls": "label"},
-        ]
-        for hop in tdata["visible_hops"]:
-            hop_label = self._hop_label(hop)
-            is_ellipsis = isinstance(hop, dict) and hop.get("_ellipsis")
-            cls = "node-hop-ellipsis" if is_ellipsis else "node-hop"
-            chain.append({
-                "label": hop_label, "cls": cls, "text_cls": "label-hop",
-            })
-        while len(chain) < 2 + max_hops:
-            chain.append(None)
-        chain.append({
-            "label": tdata["target"], "cls": "node-target",
-            "text_cls": "label-target",
-        })
-
-        for i in range(len(chain) - 1):
-            a, b = chain[i], chain[i + 1]
-            if a is None or b is None:
-                continue
-            x1 = col_x(i) + w
-            x2 = col_x(i + 1)
-            cy = y + h // 2
-            parts.append(
-                f'  <line class="conn" x1="{x1}" y1="{cy}" '
-                f'x2="{x2}" y2="{cy}" />'
-            )
-
-        for i, node in enumerate(chain):
-            if node is None:
-                continue
-            nx = col_x(i)
-            parts.append(
-                f'  <rect class="{node["cls"]}" x="{nx}" y="{y}" '
-                f'width="{w}" height="{h}" rx="2" />'
-            )
-            parts.append(
-                f'  <text class="label {node["text_cls"]}" '
-                f'x="{nx + w // 2}" y="{y + h // 2 + 4}">'
-                f'{self._escape_xml(node["label"])}</text>'
-            )
-
-    def _hop_label(self, hop) -> str:
-        if isinstance(hop, dict):
-            if hop.get("_ellipsis"):
-                return hop.get("ip", "... more ...")
-            ip = hop.get("ip") or hop.get("host")
-            if not ip or ip == "*":
-                return "(timeout)"
-            return ip[:14]
-        if str(hop) == "*":
-            return "(timeout)"
-        return str(hop)[:14]
-
-    # legend rendered at the bottom of the diagram
-    def _svg_legend(self, x: int, y: int) -> str:
-        return f"""  <text class="legend-title" x="{x}" y="{y}">LEGEND</text>
-  <rect class="node-host" x="{x}" y="{y + 8}" width="14" height="14" />
-  <text class="legend-item" x="{x + 20}" y="{y + 20}">this host</text>
-  <rect class="node-gateway" x="{x + 100}" y="{y + 8}" width="14" height="14" />
-  <text class="legend-item" x="{x + 120}" y="{y + 20}">default gateway</text>
-  <rect class="node-hop" x="{x + 240}" y="{y + 8}" width="14" height="14" />
-  <text class="legend-item" x="{x + 260}" y="{y + 20}">intermediate hop</text>
-  <rect class="node-target" x="{x + 400}" y="{y + 8}" width="14" height="14" />
-  <text class="legend-item" x="{x + 420}" y="{y + 20}">reachability target</text>
-  <text class="subtitle" x="{x}" y="{y + 45}">
-    Diagram reflects observed routes at capture time.
-    Route paths change over time; see docs/OPERATIONS.md.
-  </text>
-"""
-
-    # produces a minimal "no data yet" diagram when route collector has no samples
-    def _empty_topology_svg(self, hostname: str, ts: str) -> str:
-        return f"""<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="600" height="200" viewBox="0 0 600 200"
-     font-family="Consolas, monospace">
-  <rect fill="#000000" width="600" height="200" />
-  <text fill="#ffb000" font-size="16" font-weight="bold" x="30" y="30">
-    ENACT · Network Topology
-  </text>
-  <text fill="#5a7e8a" font-size="11" x="30" y="50">
-    host {hostname}  ·  captured {ts}
-  </text>
-  <text fill="#ff3030" font-size="14" font-weight="bold" x="30" y="110">
-    NO ROUTE DATA AVAILABLE YET
-  </text>
-  <text fill="#5a7e8a" font-size="11" x="30" y="130">
-    The route collector runs every 300 seconds. Run ENACT for at least
-  </text>
-  <text fill="#5a7e8a" font-size="11" x="30" y="145">
-    5-10 minutes so route samples accumulate, then re-export.
-  </text>
-</svg>
-"""
-
-    # minimal XML escape for user data going into SVG text elements
-    def _escape_xml(self, s: str) -> str:
-        return (str(s).replace("&", "&amp;").replace("<", "&lt;")
-                .replace(">", "&gt;").replace('"', "&quot;"))
-
     # builds the plaintext report, bounded so it doesn't grow unbounded
     # even on long-running sessions. structured with a header, event log,
     # current metrics snapshot, and recent sample tails per collector
@@ -1097,20 +836,6 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     text-shadow: none;
 }
 
-/* topology button gets cyan to distinguish from export's amber, and to
-   match the "diagram / structural" mental category */
-.panel-title-btn.topology-btn {
-    color: var(--cyan);
-    border-color: var(--cyan);
-    text-shadow: var(--glow-cyan);
-}
-.panel-title-btn.topology-btn:hover {
-    background: var(--red);
-    color: black;
-    border-color: var(--red);
-    text-shadow: none;
-}
-
 /* incident log popup: modal listing past critical events, click one to
    reopen its incident window */
 #incident-log-popup {
@@ -1407,7 +1132,7 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
 
         <!-- bottom-left: event log -->
         <div class="panel">
-            <span class="panel-title">[ EVENT LOG ] <button class="info-btn" data-info="events">i</button> <button class="panel-title-btn" id="incident-log-btn">◆ INCIDENTS</button> <button class="panel-title-btn export-btn" id="export-logs-btn">⇩ EXPORT</button> <button class="panel-title-btn topology-btn" id="export-topology-btn">◈ TOPOLOGY</button></span>
+            <span class="panel-title">[ EVENT LOG ] <button class="info-btn" data-info="events">i</button> <button class="panel-title-btn" id="incident-log-btn">◆ INCIDENTS</button> <button class="panel-title-btn export-btn" id="export-logs-btn">⇩ EXPORT</button></span>
             <div class="scroll-area">
                 <table id="tbl-events">
                     <thead><tr>
@@ -1420,7 +1145,7 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
 
         <!-- bottom-right: live latency oscilloscope -->
         <div class="panel">
-            <span class="panel-title">[ LATENCY TRACE · LIVE OSCILLOSCOPE ] <button class="info-btn" data-info="latency">i</button></span>
+            <span class="panel-title">[ LATENCY TRACE LIVE REPORT ] <button class="info-btn" data-info="latency">i</button></span>
             <div id="chart-canvas-wrap">
                 <canvas id="chart-canvas"></canvas>
                 <!-- overlay: shown only when chart has no data to draw.
@@ -1504,7 +1229,7 @@ const PANEL_INFO = {
         body: "Chronological log of anomalies detected by the analyzers. Severity is INFO (routine change), WARN (something notable), or CRIT (something wrong). Critical events also trigger a full-screen alarm and open a dedicated incident window. Boxed values in each summary are the diagnostic data - fingerprints, IPs, hop counts - so the eye can catch what actually changed at a glance.",
     },
     latency: {
-        title: "LATENCY TRACE · LIVE OSCILLOSCOPE",
+        title: "LATENCY TRACE LIVE REPORT",
         body: "Live ping latency to three public DNS resolvers: Cloudflare, Google, and Quad9. Uses ICMP echo. If the chart shows 'NO DATA · ICMP BLOCKED OR UNREACHABLE', your network drops ping packets - common with VPNs and corporate firewalls - and this specific chart can't gather data. Other collectors (DNS resolution timing, route tracing) still work under those conditions.",
     },
 };
@@ -1578,36 +1303,6 @@ function initExportButton() {
     });
 }
 
-/* TOPOLOGY button. requests an SVG topology diagram from python,
-   which prompts the user with a Save As dialog and writes the file */
-function initTopologyButton() {
-    const btn = document.getElementById("export-topology-btn");
-    if (!btn) return;
-    btn.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        const originalText = btn.textContent;
-        btn.disabled = true;
-        btn.textContent = "GENERATING...";
-        try {
-            const result = await window.pywebview.api.export_topology();
-            if (result && result.ok) {
-                if (result.cancelled) {
-                    btn.textContent = originalText;
-                } else {
-                    btn.textContent = "SAVED";
-                    setTimeout(() => { btn.textContent = originalText; }, 1600);
-                }
-            } else {
-                btn.textContent = "FAILED";
-                setTimeout(() => { btn.textContent = originalText; }, 2000);
-            }
-        } catch (err) {
-            btn.textContent = "FAILED";
-            setTimeout(() => { btn.textContent = originalText; }, 2000);
-        }
-        btn.disabled = false;
-    });
-}
 
 /* format a numeric value compactly: floats get one decimal, ints stay whole */
 function formatValue(v) {
@@ -2225,7 +1920,6 @@ function bootUiOnly() {
     initTestAlarmButton();
     initIncidentLogButton(); 
     initExportButton();
-    initTopologyButton();
 }
 
 /* watermark for the alarm system: only fire for events strictly newer than this.

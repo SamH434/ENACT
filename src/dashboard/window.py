@@ -215,11 +215,27 @@ class DashboardAPI:
         section("END OF REPORT")
         return buf.getvalue()
 
-    # opens the incident window in "test mode" without inserting anything into
-    # the events table. this keeps the event log clean of synthetic data while
-    # still letting users demo the full alarm-flash + incident-window UX.
-    # the incident window itself handles the -1 sentinel and renders canned content
+    # tracks recent test-incident launches so we can rate-limit them.
+    # class-level so instances share the state — there's only one dashboard
+    # instance anyway but this is cleaner than a global
+    _test_launches: list[float] = []
+
+    # opens the incident window in test mode
     def launch_test_incident(self) -> dict:
+        import time as _time
+
+        MAX_LAUNCHES_PER_WINDOW = 3
+        RATE_WINDOW_SEC = 15.0
+
+        now = _time.monotonic()
+        type(self)._test_launches = [
+            t for t in type(self)._test_launches
+            if now - t < RATE_WINDOW_SEC
+        ]
+        if len(type(self)._test_launches) >= MAX_LAUNCHES_PER_WINDOW:
+            return {"ok": False, "error": "rate_limited"}
+        type(self)._test_launches.append(now)
+
         try:
             subprocess.Popen(
                 [sys.executable, "-m", "src.dashboard.incident", "-1"],
@@ -616,12 +632,10 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
 .scroll-area::-webkit-scrollbar-thumb {
     background: var(--cyan);
     border: 1px solid var(--cyan-dim);
-    box-shadow: 0 0 6px rgba(0, 175, 255, 0.5);
 }
 .scroll-area::-webkit-scrollbar-thumb:hover {
     background: var(--amber-bright);
     border-color: var(--amber);
-    box-shadow: 0 0 8px rgba(255, 176, 0, 0.6);
 }
 
 /* connectivity status column: three vertical status boxes on the left of the
@@ -801,13 +815,13 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 1px 8px;
+    padding: 3px 14px;
     margin-left: 8px;
     background: transparent;
     color: var(--red);
-    border: 1px solid var(--red);
+    border: 2px solid var(--red);
     font-family: inherit;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: bold;
     letter-spacing: 1px;
     cursor: pointer;
@@ -816,6 +830,7 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     text-shadow: var(--glow-red);
     vertical-align: middle;
 }
+
 .panel-title-btn:hover {
     background: var(--red);
     color: black;
@@ -1873,42 +1888,64 @@ function initInfoButtons() {
    fast double-clicks or focus/keyboard dispatch races */
 let testAlarmInFlight = false;
 
+/* TRIGGER TEST INCIDENT button. defense-in-depth against spam:
+   1. JS-level in-flight flag prevents overlapping launches
+   2. JS-level cooldown countdown, visible to the user
+   3. python-side rate limit as a hard backstop (see launch_test_incident) */
+let testAlarmCooldownUntil = 0;
+let testAlarmCountdownTimer = null;
+
 function initTestAlarmButton() {
     const btn = document.getElementById("test-alarm-btn");
     if (!btn) return;
+
+    const originalText = "TRIGGER TEST INCIDENT";
+    const COOLDOWN_MS = 5000;
+
+    // updates the button label to show remaining cooldown seconds
+    function updateCountdown() {
+        const remaining = Math.ceil((testAlarmCooldownUntil - Date.now()) / 1000);
+        if (remaining <= 0) {
+            btn.textContent = originalText;
+            btn.disabled = false;
+            clearInterval(testAlarmCountdownTimer);
+            testAlarmCountdownTimer = null;
+        } else {
+            btn.textContent = `COOLDOWN · ${remaining}s`;
+        }
+    }
+
     btn.addEventListener("click", async () => {
-        // hard guard: if a test launch is already running, ignore additional
-        // clicks. btn.disabled alone isn't enough because focus/keyboard events
-        // can slip through before the first async iteration completes
-        if (testAlarmInFlight) return;
-        testAlarmInFlight = true;
+        // hard guard: if we're inside cooldown, ignore. clicks during
+        // "COOLDOWN · 4s" state are silently discarded
+        if (Date.now() < testAlarmCooldownUntil) return;
+
+        // enter cooldown state immediately, before any async work.
+        // this closes the race window between click and disable
+        testAlarmCooldownUntil = Date.now() + COOLDOWN_MS;
         btn.disabled = true;
         btn.textContent = "TRIGGERING...";
 
-        // pass launchIncident=false because we launch the test incident
-        // ourselves right after this via launch_test_incident(). without this,
-        // triggerAlarm would ALSO try to launch, giving us two windows
+        // start countdown ticker
+        if (testAlarmCountdownTimer) clearInterval(testAlarmCountdownTimer);
+        testAlarmCountdownTimer = setInterval(updateCountdown, 250);
+
+        // fire the strobe (client-side only)
         triggerAlarm({
             id: -1,
             type: "test_incident",
             summary: "TEST · Synthetic incident from dashboard button",
         }, false);
 
+        // launch the incident window subprocess
         try {
             const result = await window.pywebview.api.launch_test_incident();
-            if (!result || !result.ok) {
-                btn.textContent = "TEST FAILED";
+            if (result && !result.ok && result.error === "rate_limited") {
+                btn.textContent = "RATE LIMITED";
+                // extend the visual cooldown so the user sees the message
+                testAlarmCooldownUntil = Date.now() + 3000;
             }
-        } catch (e) { /* ignore, alarm still fires locally */ }
-
-        // 3-second cooldown before the button can be pressed again. long
-        // enough that the incident window is fully open, short enough that
-        // impatient testing still feels responsive
-        setTimeout(() => {
-            btn.textContent = "TRIGGER TEST INCIDENT";
-            btn.disabled = false;
-            testAlarmInFlight = false;
-        }, 3000);
+        } catch (e) { /* alarm still fired locally */ }
     });
 }
 

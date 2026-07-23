@@ -160,32 +160,47 @@ class DashboardAPI:
             return {"ok": False, "error": str(e)}
 
     # builds an SVG topology diagram from the route collector's recent samples.
-    # renders as a horizontal chain: host -> gateway -> intermediate hops ->
-    # reachability target. one row per target. bounded in width so it prints.
+    # renders as a horizontal chain per target. caps intermediate hops at
+    # MAX_VISIBLE_HOPS to keep the diagram printable and readable
     def _build_topology_svg(self) -> str:
         import socket
 
         hostname = socket.gethostname()
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
         gateway = self._get_current_gateway()
-
         targets_data = self._get_route_topology()
 
         if not targets_data:
             return self._empty_topology_svg(hostname, now_str)
 
-        NODE_W = 130
+        # cap hop rendering: if a route has more than this many intermediate
+        # hops, we collapse the middle into "... N more ..." so the diagram
+        # stays readable at print size
+        MAX_VISIBLE_HOPS = 5
+        NODE_W = 110
         NODE_H = 40
-        H_GAP = 24
-        V_GAP = 60
+        H_GAP = 20
+        V_GAP = 70
         LEFT_MARGIN = 30
         TOP_MARGIN = 80
 
-        max_hops = max(len(t["hops"]) for t in targets_data) if targets_data else 0
-        chain_len = 2 + max_hops + 1
+        for t in targets_data:
+            raw_hops = t["hops"]
+            if len(raw_hops) <= MAX_VISIBLE_HOPS:
+                t["visible_hops"] = raw_hops
+            else:
+                omitted = len(raw_hops) - 4
+                t["visible_hops"] = (
+                    raw_hops[:2]
+                    + [{"ip": f"... {omitted} more ...", "_ellipsis": True}]
+                    + raw_hops[-2:]
+                )
+
+        max_visible_hops = max(len(t["visible_hops"]) for t in targets_data)
+        # chain: host, gateway, hops, target
+        chain_len = 2 + max_visible_hops + 1
         diagram_w = LEFT_MARGIN * 2 + chain_len * NODE_W + (chain_len - 1) * H_GAP
-        diagram_h = TOP_MARGIN + len(targets_data) * V_GAP + 80
+        diagram_h = TOP_MARGIN + len(targets_data) * V_GAP + 110
 
         parts = [self._svg_header(diagram_w, diagram_h, hostname, now_str)]
 
@@ -193,10 +208,10 @@ class DashboardAPI:
             y = TOP_MARGIN + row_idx * V_GAP
             self._render_target_row(parts, tdata, gateway, hostname,
                                     LEFT_MARGIN, y, NODE_W, NODE_H, H_GAP,
-                                    max_hops)
+                                    max_visible_hops)
 
-        parts.append(self._svg_legend(LEFT_MARGIN, TOP_MARGIN + len(targets_data)
-                                       * V_GAP + 30))
+        parts.append(self._svg_legend(LEFT_MARGIN,
+                                       TOP_MARGIN + len(targets_data) * V_GAP + 30))
         parts.append("</svg>")
         return "\n".join(parts)
 
@@ -251,6 +266,7 @@ class DashboardAPI:
     .node-host {{ fill: #0a0a0a; stroke: #00afff; stroke-width: 2; }}
     .node-gateway {{ fill: #0a0a0a; stroke: #ffb000; stroke-width: 2; }}
     .node-hop {{ fill: #050505; stroke: #5a7e8a; stroke-width: 1.5; }}
+    .node-hop-ellipsis { fill: #050505; stroke: #5a7e8a; stroke-width: 1; stroke-dasharray: 4 3; }
     .node-target {{ fill: #0a0a0a; stroke: #5fcf5f; stroke-width: 2; }}
     .label {{ font-size: 11px; fill: #d7af00; text-anchor: middle; }}
     .label-host {{ fill: #00afff; }}
@@ -277,10 +293,12 @@ class DashboardAPI:
             {"label": hostname[:14], "cls": "node-host", "text_cls": "label-host"},
             {"label": gateway, "cls": "node-gateway", "text_cls": "label"},
         ]
-        for hop in tdata["hops"][:max_hops]:
+        for hop in tdata["visible_hops"]:
             hop_label = self._hop_label(hop)
+            is_ellipsis = isinstance(hop, dict) and hop.get("_ellipsis")
+            cls = "node-hop-ellipsis" if is_ellipsis else "node-hop"
             chain.append({
-                "label": hop_label, "cls": "node-hop", "text_cls": "label-hop",
+                "label": hop_label, "cls": cls, "text_cls": "label-hop",
             })
         while len(chain) < 2 + max_hops:
             chain.append(None)
@@ -315,11 +333,16 @@ class DashboardAPI:
                 f'{self._escape_xml(node["label"])}</text>'
             )
 
-    # compact label for a hop: prefer IP, fall back to whatever's present
     def _hop_label(self, hop) -> str:
         if isinstance(hop, dict):
-            ip = hop.get("ip") or hop.get("host") or "*"
+            if hop.get("_ellipsis"):
+                return hop.get("ip", "... more ...")
+            ip = hop.get("ip") or hop.get("host")
+            if not ip or ip == "*":
+                return "(timeout)"
             return ip[:14]
+        if str(hop) == "*":
+            return "(timeout)"
         return str(hop)[:14]
 
     # legend rendered at the bottom of the diagram

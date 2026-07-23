@@ -21,7 +21,11 @@ from src.collectors.base import Collector
 from src.utils.records import TelemetryRecord
 
 
-DEFAULT_TARGETS = ["1.1.1.1", "8.8.8.8"]
+# the three public DNS resolvers matching the
+# connectivity collector's defaults. keeping targets aligned across collectors
+# ensures dashboard/topology views cover the same infrastructure consistently
+DEFAULT_TARGETS = ["1.1.1.1", "8.8.8.8", "9.9.9.9"]
+
 DEFAULT_MAX_HOPS = 20
 DEFAULT_TIMEOUT_MS = 2000 
 

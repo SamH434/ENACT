@@ -417,3 +417,26 @@ Quick reference for interpreting the dashboard at a glance.
 
 Future revisions should preserve the "honesty check" pattern for any new
 analyzer added.
+
+## 9. Topology export
+
+The dashboard's TOPOLOGY button renders an SVG diagram of the current
+observed network path from this host to the three reachability targets.
+
+The diagram uses only data the route collector already produces (recent
+tracert output), rendered as horizontal chains: host → gateway →
+intermediate hops → reachability target. No external tools required to
+view (any browser opens SVG); vector editors (Figma, Inkscape,
+Illustrator) can edit it.
+
+**What the diagram is:** a snapshot of the observed L3 path at export
+time. Useful for documentation, incident reports, or bringing to
+conversations about the network you're on.
+
+**What the diagram is not:** a live topology. Route paths change over
+time, see the `route_change` analyzer for how ENACT handles that. If
+you need multiple snapshots, export the diagram at different times.
+
+**Explicitly not represented:** wireless topology (BSSIDs, mesh
+relationships) and hosts other than this one. Both are out of scope
+for single-host observability.

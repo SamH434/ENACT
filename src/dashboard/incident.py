@@ -699,7 +699,6 @@ async function tick() {
     }
 }
 
-/* wire up the acknowledge button */
 function wireActions() {
     document.getElementById("ack-btn").addEventListener("click", async () => {
         try { await window.pywebview.api.close_window(); }

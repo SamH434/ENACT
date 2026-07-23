@@ -56,7 +56,7 @@ def get_logger(name: str) -> logging.Logger:
     """Return a configured logger. Safe to call multiple times per module."""
     logger = logging.getLogger(name)
     if logger.handlers:
-        return logger  # already wired up for this name
+        return logger  
 
     logger.setLevel(logging.DEBUG)
 

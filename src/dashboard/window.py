@@ -1074,6 +1074,20 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     text-shadow: none;
 }
 
+/* topology button gets cyan to distinguish from export's amber, and to
+   match the "diagram / structural" mental category */
+.panel-title-btn.topology-btn {
+    color: var(--cyan);
+    border-color: var(--cyan);
+    text-shadow: var(--glow-cyan);
+}
+.panel-title-btn.topology-btn:hover {
+    background: var(--red);
+    color: black;
+    border-color: var(--red);
+    text-shadow: none;
+}
+
 /* incident log popup: modal listing past critical events, click one to
    reopen its incident window */
 #incident-log-popup {
@@ -1370,7 +1384,7 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
 
         <!-- bottom-left: event log -->
         <div class="panel">
-            <span class="panel-title">[ EVENT LOG ] <button class="info-btn" data-info="events">i</button> <button class="panel-title-btn" id="incident-log-btn">◆ INCIDENTS</button> <button class="panel-title-btn export-btn" id="export-logs-btn">⇩ EXPORT</button></span>
+            <span class="panel-title">[ EVENT LOG ] <button class="info-btn" data-info="events">i</button> <button class="panel-title-btn" id="incident-log-btn">◆ INCIDENTS</button> <button class="panel-title-btn export-btn" id="export-logs-btn">⇩ EXPORT</button> <button class="panel-title-btn topology-btn" id="export-topology-btn">◈ TOPOLOGY</button></span>
             <div class="scroll-area">
                 <table id="tbl-events">
                     <thead><tr>
@@ -1509,7 +1523,7 @@ function ago(isoTs) {
     return Math.floor(secs / 86400) + "d";
 }
 
-/* wire the EXPORT button. requests a plaintext dump of everything relevant
+/* EXPORT button. requests a plaintext dump of everything relevant
    (events, current state, recent samples) from python, which prompts the
    user with a Save As dialog and writes to the chosen file */
 function initExportButton() {
@@ -1541,6 +1555,37 @@ function initExportButton() {
     });
 }
 
+/* TOPOLOGY button. requests an SVG topology diagram from python,
+   which prompts the user with a Save As dialog and writes the file */
+function initTopologyButton() {
+    const btn = document.getElementById("export-topology-btn");
+    if (!btn) return;
+    btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = "GENERATING...";
+        try {
+            const result = await window.pywebview.api.export_topology();
+            if (result && result.ok) {
+                if (result.cancelled) {
+                    btn.textContent = originalText;
+                } else {
+                    btn.textContent = "SAVED";
+                    setTimeout(() => { btn.textContent = originalText; }, 1600);
+                }
+            } else {
+                btn.textContent = "FAILED";
+                setTimeout(() => { btn.textContent = originalText; }, 2000);
+            }
+        } catch (err) {
+            btn.textContent = "FAILED";
+            setTimeout(() => { btn.textContent = originalText; }, 2000);
+        }
+        btn.disabled = false;
+    });
+}
+
 /* format a numeric value compactly: floats get one decimal, ints stay whole */
 function formatValue(v) {
     if (v === null || v === undefined) return "-";
@@ -1561,7 +1606,7 @@ function formatCompactTime(isoTs) {
     return `${mm}-${dd} ${hh}:${mi}`;
 }
 
-/* wire the INCIDENTS button in the event log panel. opens a modal listing
+/* INCIDENTS button in the event log panel. opens a modal listing
    past critical events, click any row to relaunch its incident window */
 function initIncidentLogButton() {
     const btn = document.getElementById("incident-log-btn");
@@ -1607,7 +1652,7 @@ function renderIncidentList(events) {
         </div>
     `).join("");
 
-    // wire click handlers
+    // click handlers
     list.querySelectorAll(".incident-row").forEach(row => {
         row.addEventListener("click", () => {
             const eventId = parseInt(row.dataset.eventId, 10);
@@ -2073,7 +2118,7 @@ async function pullLatency(chart) {
    the DOM). we DO wait for pywebviewready for the polling loops, but with a
    fallback timeout in case the event was already fired before our listener bound. */
 
-/* wire up the (i) buttons on each panel title. click opens the info popup
+/* INFO (i) buttons on each panel title. click opens the info popup
    with content from PANEL_INFO; click outside or CLOSE dismisses */
 function initInfoButtons() {
     const popup = document.getElementById("info-popup");
@@ -2104,7 +2149,7 @@ function initInfoButtons() {
     });
 }
 
-/* wire the TRIGGER TEST INCIDENT button. fires the strobe flash locally and
+/* TRIGGER TEST INCIDENT button. fires the strobe flash locally and
    launches the incident window with a sentinel event id, without touching
    the events table. an in-flight flag prevents duplicate launches from
    fast double-clicks or focus/keyboard dispatch races */
@@ -2157,6 +2202,7 @@ function bootUiOnly() {
     initTestAlarmButton();
     initIncidentLogButton(); 
     initExportButton();
+    initTopologyButton();
 }
 
 /* watermark for the alarm system: only fire for events strictly newer than this.

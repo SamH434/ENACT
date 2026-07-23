@@ -172,7 +172,6 @@ class TestStatusCollectorTunnelDetection:
             hints=["vpn"], physical=["wi-fi"],
         ) is False
 
-# captured 'netsh advfirewall show allprofiles' output for a healthy machine
 NETSH_ADVFIREWALL_ALL_ENABLED = """
 Domain Profile Settings:
 ----------------------------------------------------------------------

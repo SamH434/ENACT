@@ -30,7 +30,6 @@ from src.utils.logger import get_logger
 
 log = get_logger("enact.main")
 
-# wires up the collectors and their intervals, then runs the scheduler forever
 def main() -> None:
     log.info("ENACT starting up")
 

@@ -130,6 +130,81 @@ class DashboardAPI:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    # returns diagnostic stats about the database so the user can make an
+    # informed decision before clearing anything. displayed in the confirmation
+    # dialog so the "you're about to delete X samples" text is honest
+    def get_data_stats(self) -> dict:
+        try:
+            import sqlite3
+            from pathlib import Path
+
+            db_path = Path(database.DB_PATH)
+            db_size_bytes = db_path.stat().st_size if db_path.exists() else 0
+
+            with sqlite3.connect(str(db_path)) as conn:
+                sample_count = conn.execute(
+                    "SELECT COUNT(*) FROM samples"
+                ).fetchone()[0]
+                event_count = conn.execute(
+                    "SELECT COUNT(*) FROM events"
+                ).fetchone()[0]
+                run_count = conn.execute(
+                    "SELECT COUNT(*) FROM runs"
+                ).fetchone()[0]
+                oldest = conn.execute(
+                    "SELECT MIN(ts) FROM samples"
+                ).fetchone()[0]
+
+            return {
+                "ok": True,
+                "db_size_mb": round(db_size_bytes / 1024 / 1024, 2),
+                "sample_count": sample_count,
+                "event_count": event_count,
+                "run_count": run_count,
+                "oldest_sample_ts": oldest,
+            }
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    # deletes samples and runs but preserves events by default, since events
+    # are the "interesting" historical data and are already tiny (hundreds of
+    # rows, not tens of thousands). keeping events means the incident log stays
+    # populated after a clear. destructive: no undo
+    def clear_telemetry_data(self, keep_events: bool = True) -> dict:
+        try:
+            import sqlite3
+
+            with sqlite3.connect(str(database.DB_PATH)) as conn:
+                samples_before = conn.execute(
+                    "SELECT COUNT(*) FROM samples"
+                ).fetchone()[0]
+                runs_before = conn.execute(
+                    "SELECT COUNT(*) FROM runs"
+                ).fetchone()[0]
+                events_before = conn.execute(
+                    "SELECT COUNT(*) FROM events"
+                ).fetchone()[0]
+
+                conn.execute("DELETE FROM samples")
+                conn.execute("DELETE FROM runs")
+                if not keep_events:
+                    conn.execute("DELETE FROM events")
+                conn.commit()
+
+            with sqlite3.connect(str(database.DB_PATH)) as conn:
+                conn.execute("VACUUM")
+
+            events_after = 0 if not keep_events else events_before
+            return {
+                "ok": True,
+                "samples_deleted": samples_before,
+                "runs_deleted": runs_before,
+                "events_deleted": events_before - events_after,
+                "events_kept": events_after,
+            }
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+        
     # builds the plaintext report, bounded so it doesn't grow unbounded
     # even on long-running sessions. structured with a header, event log,
     # current metrics snapshot, and recent sample tails per collector
@@ -464,6 +539,22 @@ html, body {
     text-shadow: none;
 }
 
+/* perf readout in the footer: shows current snapshot query time so the user
+   has visibility into whether the tool is running efficiently. thresholds
+   change color: green under 100ms, yellow under 500ms, red over 500ms. */
+.perf-readout {
+    color: var(--cyan-dim);
+    font-size: 10px;
+    letter-spacing: 1px;
+    padding: 0 12px;
+    text-shadow: var(--glow-cyan);
+    min-width: 130px;
+    text-align: right;
+}
+.perf-readout.ok  { color: var(--green-dim); text-shadow: var(--glow-green); }
+.perf-readout.mid { color: var(--yellow); text-shadow: var(--glow-yellow); }
+.perf-readout.bad { color: var(--red); text-shadow: var(--glow-red); }
+
 /* tables: align cells, color headers, mute borders */
 table {
     width: 100%;
@@ -497,6 +588,7 @@ td.event-num {
 
 td.source { color: var(--cyan); }
 td.age    { color: var(--cyan); font-size: 12px; }
+td.age.stalled { color: var(--red); font-weight: bold; text-shadow: var(--glow-red); }
 td.value  { color: var(--amber-bright); font-weight: bold; text-align: right; }
 td.right  { text-align: right; }
 /* per-color glow overrides: text-shadow should match the text color, not
@@ -816,6 +908,45 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     text-shadow: none;
 }
 
+/* clear button gets red styling to signal "destructive action", the same
+   visual language as the alarm elements. hovering into full red confirms it */
+.panel-title-btn.clear-btn {
+    color: var(--red-bright);
+    border-color: var(--red-bright);
+    text-shadow: var(--glow-red);
+}
+.panel-title-btn.clear-btn:hover {
+    background: var(--red);
+    color: black;
+    border-color: var(--red);
+    text-shadow: none;
+}
+
+/* refresh progress bar: 60px wide 4px tall pulse that fills over each
+   REFRESH_MS interval. cyan background, amber fill, resets on each tick.
+   visually communicates "the system is actively working", a static
+   dashboard reads as broken to users, an animated one reads as alive */
+.refresh-progress {
+    display: inline-block;
+    width: 70px;
+    height: 4px;
+    margin-left: 12px;
+    background: rgba(0, 175, 255, 0.15);
+    border: 1px solid rgba(0, 175, 255, 0.35);
+    vertical-align: middle;
+    overflow: hidden;
+}
+.refresh-progress-bar {
+    display: block;
+    height: 100%;
+    width: 0%;
+    background: var(--amber);
+    box-shadow: inset 0 0 4px rgba(255, 176, 0, 0.6);
+    /* transition creates the smooth fill animation as the bar's width
+       is updated by JS. we get the fill-from-left visual for free from CSS */
+    transition: width 0.1s linear;
+}
+
 /* small button in a panel title bar, for actions like reopening incidents.
    same visual language as the acknowledged / info buttons */
 .panel-title-btn {
@@ -844,6 +975,29 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     text-shadow: none;
 }
 
+/* clear button gets red styling to signal "destructive action", the same
+   visual language as the alarm elements. hovering into solid red confirms it */
+.panel-title-btn.clear-btn {
+    color: var(--red-bright);
+    border-color: var(--red-bright);
+    text-shadow: var(--glow-red);
+}
+.panel-title-btn.clear-btn:hover {
+    background: var(--red);
+    color: black;
+    border-color: var(--red);
+    text-shadow: none;
+}
+
+/* clear-data modal card gets a red border to visually emphasize destructive */
+#clear-data-popup .clear-card {
+    border-color: var(--red);
+    box-shadow: 0 0 60px rgba(0, 0, 0, 0.9),
+                0 0 24px rgba(255, 48, 48, 0.25);
+}
+#clear-data-popup .title { color: var(--red-bright); text-shadow: var(--glow-red); }
+#clear-data-popup .subtitle { color: var(--red-dim); text-shadow: var(--glow-red); }
+
 /* export button gets amber styling to distinguish from the red incident button.
    still uses the same "hover turns red" language as everything else */
 .panel-title-btn.export-btn {
@@ -857,6 +1011,44 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     border-color: var(--red);
     text-shadow: none;
 }
+
+<!-- clear data confirmation modal: destructive action with data-stats
+         so the user knows what they're about to delete. also nudges toward
+         EXPORT first as a backup path -->
+    <div id="clear-data-popup" class="hidden">
+        <div class="card clear-card">
+            <div class="title">⌫ CLEAR TELEMETRY DATA</div>
+            <div class="subtitle">DESTRUCTIVE ACTION · NO UNDO</div>
+            <div class="body">
+                <p id="clear-data-stats" style="line-height: 1.6;">loading stats...</p>
+                <p style="color: var(--cyan); margin-top: 14px; line-height: 1.5;">
+                    Consider <strong>exporting your data first</strong> so you have
+                    a backup of the current session before clearing.
+                </p>
+                <div style="margin-top: 12px;">
+                    <label style="display: block; color: var(--amber); margin-bottom: 8px;">
+                        <input type="checkbox" id="clear-keep-events" checked>
+                        Keep event history (recommended)
+                    </label>
+                    <div style="color: var(--text-mute); font-size: 11px; line-height: 1.4;">
+                        Events are the interesting historical record. Samples and
+                        runs are the bulk data that slows things down over time.
+                    </div>
+                </div>
+            </div>
+            <div class="btn-row" style="gap: 10px; display: flex; justify-content: flex-end;">
+                <button class="info-close-btn" id="clear-export-first-btn"
+                        style="border-color: var(--amber); color: var(--amber);">
+                    ⇩ EXPORT FIRST
+                </button>
+                <button class="info-close-btn" id="clear-data-cancel-btn">CANCEL</button>
+                <button class="info-close-btn" id="clear-data-confirm-btn"
+                        style="border-color: var(--red); color: var(--red);">
+                    CONFIRM CLEAR
+                </button>
+            </div>
+        </div>
+    </div>
 
 /* incident log popup: modal listing past critical events, click one to
    reopen its incident window */
@@ -1068,6 +1260,7 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     text-shadow: var(--glow-cyan);
 }
 
+
 </style>
 </head>
 <body>
@@ -1154,7 +1347,7 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
 
         <!-- bottom-left: event log -->
         <div class="panel">
-            <span class="panel-title">[ EVENT LOG ] <button class="info-btn" data-info="events">i</button> <button class="panel-title-btn" id="incident-log-btn">◆ INCIDENTS</button> <button class="panel-title-btn export-btn" id="export-logs-btn">⇩ EXPORT</button></span>
+            <span class="panel-title">[ EVENT LOG ] <button class="info-btn" data-info="events">i</button> <button class="panel-title-btn" id="incident-log-btn">◆ INCIDENTS</button> <button class="panel-title-btn export-btn" id="export-logs-btn">⇩ EXPORT</button> <button class="panel-title-btn clear-btn" id="clear-data-btn">⌫ CLEAR</button></span>            
             <div class="scroll-area">
                 <table id="tbl-events">
                     <thead><tr>
@@ -1186,6 +1379,7 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     <div id="footer">
         <button class="footer-btn" id="test-alarm-btn">TRIGGER TEST INCIDENT</button>
         <span class="footer-hint">PRESS ALT+F4 OR CLOSE WINDOW TO DISENGAGE</span>
+        <span class="perf-readout" id="perf-readout">snapshot: </span>
     </div>
 
     <!-- alarm overlay: strobes the EMERGENCY word only, with static info below.
@@ -1448,7 +1642,33 @@ function tickClock() {
         `${dayName}, ${monthName}. ${dayOfMonth}`;
 }
 
-/* render the collector health table from snapshot data */
+/* expected max age per collector before we consider it stalled. these mirror
+   the intervals in main.py, we go 2x the expected interval to allow for
+   normal cycle jitter. if the actual "last cycle" age exceeds this, the LAST
+   column turns red as a stall indicator */
+const COLLECTOR_STALL_THRESHOLD_SEC = {
+    connectivity: 60,       // 30s interval * 2
+    dns: 120,               // 60s interval * 2
+    route: 600,             // 300s interval * 2
+    wifi: 240,              // 120s interval * 2
+    status: 30,             // 15s interval * 2
+    firewall: 120,          // 60s interval * 2
+};
+
+/* updates the perf readout with the most recent snapshot query time.
+   thresholds map to color-coded severity so a slow database becomes visible
+   to the user without an intrusive popup */
+function updatePerfReadout(ms) {
+    const el = document.getElementById("perf-readout");
+    if (!el) return;
+    const rounded = Math.round(ms);
+    el.textContent = `snapshot: ${rounded}ms`;
+    el.classList.remove("ok", "mid", "bad");
+    if (rounded < 100)      el.classList.add("ok");
+    else if (rounded < 500) el.classList.add("mid");
+    else                    el.classList.add("bad");
+}
+
 function renderHealth(rows) {
     const tbody = document.querySelector("#tbl-health tbody");
     if (!rows || rows.length === 0) {
@@ -1459,9 +1679,17 @@ function renderHealth(rows) {
         const statusClass = r.status === "ok" ? "status-ok" : "status-error";
         const statusLabel = r.status === "ok" ? "● NORMAL" : "● ERROR";
         const dur = formatDuration(r.duration_ms);
+
+        // check if this collector has stalled: last cycle older than 2x its interval
+        const ageSec = r.ts
+            ? (Date.now() - new Date(r.ts).getTime()) / 1000 : 0;
+        const threshold = COLLECTOR_STALL_THRESHOLD_SEC[r.collector] || 120;
+        const isStalled = ageSec > threshold;
+        const ageClass = isStalled ? "age stalled" : "age";
+
         return `<tr>
             <td class="source">${escapeHtml((r.collector || "?").toUpperCase())}</td>
-            <td class="age">${ago(r.ts)}</td>
+            <td class="${ageClass}">${ago(r.ts)}</td>
             <td class="${statusClass}">${statusLabel}</td>
             <td class="value-left">${dur}</td>
             <td class="value-left">${r.sample_count ?? 0}</td>
@@ -1717,12 +1945,10 @@ function classifyChartState(snapshot) {
 }
 
 async function tickSnapshot() {
+    const t0 = performance.now();
     try {
         const snap = await window.pywebview.api.get_snapshot();
-
-        // each renderer wrapped so one throwing doesn't stop the others.
-        // this is defensive: individual renderers may fail on unexpected
-        // data shapes, but the dashboard should stay useful in aggregate
+        updatePerfReadout(performance.now() - t0);
         try { renderStatus(snap.status); }        catch (e) { console.error("renderStatus:", e); }
         try { renderHealth(snap.collector_health); } catch (e) { console.error("renderHealth:", e); }
         try { renderMetrics(snap.current_metrics); } catch (e) { console.error("renderMetrics:", e); }
@@ -1990,6 +2216,7 @@ function bootUiOnly() {
     initTestAlarmButton();
     initIncidentLogButton(); 
     initExportButton();
+    initClearDataButton();
 }
 
 /* watermark for the alarm system: only fire for events strictly newer than this.
@@ -2053,6 +2280,84 @@ async function triggerAlarm(event, launchIncident = true) {
         overlay.classList.add("hidden");
         alarmShowing = false;
     }, 2500);
+}
+
+/* wire the CLEAR button and its confirmation modal. defense against accidental
+   clicks via explicit confirmation, and against uninformed clicks via visible
+   data stats. nudges toward EXPORT first for backup */
+function initClearDataButton() {
+    const btn = document.getElementById("clear-data-btn");
+    if (!btn) return;
+    const popup = document.getElementById("clear-data-popup");
+    const stats = document.getElementById("clear-data-stats");
+    const cancelBtn = document.getElementById("clear-data-cancel-btn");
+    const confirmBtn = document.getElementById("clear-data-confirm-btn");
+    const exportFirstBtn = document.getElementById("clear-export-first-btn");
+    const keepEventsCheckbox = document.getElementById("clear-keep-events");
+
+    btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        stats.textContent = "loading stats...";
+        popup.classList.remove("hidden");
+        try {
+            const s = await window.pywebview.api.get_data_stats();
+            if (s && s.ok) {
+                const oldest = s.oldest_sample_ts
+                    ? new Date(s.oldest_sample_ts).toLocaleString()
+                    : "unknown";
+                stats.innerHTML = `
+                    <strong>${s.sample_count.toLocaleString()}</strong> samples,
+                    <strong>${s.event_count.toLocaleString()}</strong> events,
+                    <strong>${s.run_count.toLocaleString()}</strong> runs<br>
+                    Database size: <strong>${s.db_size_mb} MB</strong><br>
+                    Oldest sample: <strong>${oldest}</strong>
+                `;
+            } else {
+                stats.textContent = "Failed to load stats: " + (s?.error || "unknown");
+            }
+        } catch (err) {
+            stats.textContent = "Failed to load stats.";
+        }
+    });
+
+    cancelBtn.addEventListener("click", () => popup.classList.add("hidden"));
+    popup.addEventListener("click", (e) => {
+        if (e.target.id === "clear-data-popup") popup.classList.add("hidden");
+    });
+
+    exportFirstBtn.addEventListener("click", async () => {
+        try { await window.pywebview.api.export_logs(); }
+        catch (e) { /* ignore */ }
+    });
+
+    confirmBtn.addEventListener("click", async () => {
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = "CLEARING...";
+        const keepEvents = keepEventsCheckbox.checked;
+        try {
+            const result = await window.pywebview.api.clear_telemetry_data(keepEvents);
+            if (result && result.ok) {
+                confirmBtn.textContent = "CLEARED";
+                setTimeout(() => {
+                    popup.classList.add("hidden");
+                    confirmBtn.disabled = false;
+                    confirmBtn.textContent = "CONFIRM CLEAR";
+                }, 1500);
+            } else {
+                confirmBtn.textContent = "FAILED";
+                setTimeout(() => {
+                    confirmBtn.disabled = false;
+                    confirmBtn.textContent = "CONFIRM CLEAR";
+                }, 2000);
+            }
+        } catch (e) {
+            confirmBtn.textContent = "FAILED";
+            setTimeout(() => {
+                confirmBtn.disabled = false;
+                confirmBtn.textContent = "CONFIRM CLEAR";
+            }, 2000);
+        }
+    });
 }
 
 function bootPolling() {

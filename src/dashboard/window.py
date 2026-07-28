@@ -216,8 +216,6 @@ class DashboardAPI:
         return buf.getvalue()
 
     # tracks recent test-incident launches so we can rate-limit them.
-    # class-level so instances share the state — there's only one dashboard
-    # instance anyway but this is cleaner than a global
     _test_launches: list[float] = []
 
     # opens the incident window in test mode
@@ -488,6 +486,15 @@ td {
     border-bottom: 1px solid rgba(0, 175, 255, 0.04);
     vertical-align: top;
 }
+
+td.event-num {
+    color: var(--cyan-dim);
+    font-family: 'Cascadia Mono', 'Consolas', monospace;
+    font-size: 11px;
+    letter-spacing: 0;
+    text-shadow: var(--glow-cyan);
+}
+
 td.source { color: var(--cyan); }
 td.age    { color: var(--cyan); font-size: 12px; }
 td.value  { color: var(--amber-bright); font-weight: bold; text-align: right; }
@@ -1141,7 +1148,7 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
                     <th>SOURCE</th><th>METRIC</th>
                     <th>VALUE</th><th>AGE</th>
                 </tr></thead>
-                <tbody><tr><td colspan="4" class="loading">[ initializing ]</td></tr></tbody>
+                <tbody><tr><td colspan="5" class="loading">[ initializing ]</td></tr></tbody>
             </table>
         </div>
 
@@ -1151,9 +1158,9 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
             <div class="scroll-area">
                 <table id="tbl-events">
                     <thead><tr>
-                        <th>AGE</th><th>SEV</th><th>TYPE</th><th>SUMMARY</th>
+                        <th>ID</th><th>AGE</th><th>SEV</th><th>TYPE</th><th>SUMMARY</th>
                     </tr></thead>
-                    <tbody><tr><td colspan="4" class="loading">[ initializing ]</td></tr></tbody>
+                    <tbody><tr><td colspan="5" class="loading">[ initializing ]</td></tr></tbody>
                 </table>
             </div>
         </div>
@@ -1241,7 +1248,7 @@ const PANEL_INFO = {
     },
     events: {
         title: "EVENT LOG",
-        body: "Chronological log of anomalies detected by the analyzers. Severity is INFO (routine change), WARN (something notable), or CRIT (something wrong). Critical events also trigger a full-screen alarm and open a dedicated incident window. Boxed values in each summary are the diagnostic data - fingerprints, IPs, hop counts - so the eye can catch what actually changed at a glance.",
+        body: "Chronological log of anomalies detected by the analyzers. Each event has a persistent sequential ID (#1, #2, ...) that continues across ENACT restarts. Severity is INFO (routine change), WARN (something notable), or CRIT (something wrong). Critical events also trigger a full-screen alarm and open a dedicated incident window. Boxed values in each summary are the diagnostic data: fingerprints, IPs, hop counts, so the eye can catch what actually changed at a glance. All events (including historical criticals for the INCIDENTS log and this visible log) are stored in a SQLite database and can be exported to a plaintext session report using the EXPORT button.",
     },
     latency: {
         title: "LATENCY TRACE LIVE REPORT",
@@ -1326,6 +1333,26 @@ function formatValue(v) {
         return Number.isInteger(v) ? v.toString() : v.toFixed(1);
     }
     return String(v);
+}
+
+/* convert milliseconds into a human-readable duration string:
+   under 1000ms   -> "425ms"
+   under 60s      -> "24s"
+   under 60min    -> "3m 32s"
+   1h or more     -> "1h 42m"
+   this pattern lives at the display layer only; storage stays in canonical ms */
+function formatDuration(ms) {
+    if (ms === null || ms === undefined) return "?";
+    const total = Math.round(ms);
+    if (total < 1000) return `${total}ms`;
+    const totalSeconds = Math.round(total / 1000);
+    if (totalSeconds < 60) return `${totalSeconds}s`;
+    const totalMinutes = Math.floor(totalSeconds / 60);
+    const remSeconds = totalSeconds % 60;
+    if (totalMinutes < 60) return `${totalMinutes}m ${remSeconds}s`;
+    const totalHours = Math.floor(totalMinutes / 60);
+    const remMinutes = totalMinutes % 60;
+    return `${totalHours}h ${remMinutes}m`;
 }
 
 /* formats an ISO timestamp as MM-DD HH:MM for the incident log rows */
@@ -1431,7 +1458,7 @@ function renderHealth(rows) {
     tbody.innerHTML = rows.map(r => {
         const statusClass = r.status === "ok" ? "status-ok" : "status-error";
         const statusLabel = r.status === "ok" ? "● NORMAL" : "● ERROR";
-        const dur = r.duration_ms ? Math.round(r.duration_ms) + "ms" : "?";
+        const dur = formatDuration(r.duration_ms);
         return `<tr>
             <td class="source">${escapeHtml((r.collector || "?").toUpperCase())}</td>
             <td class="age">${ago(r.ts)}</td>
@@ -1492,7 +1519,7 @@ function boxifySummary(summary) {
 function renderEvents(rows) {
     const tbody = document.querySelector("#tbl-events tbody");
     if (!rows || rows.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="4" class="loading">[ no events ]</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5F" class="loading">[ no events ]</td></tr>`;
         return;
     }
     tbody.innerHTML = rows.map(r => {
@@ -1502,7 +1529,13 @@ function renderEvents(rows) {
         const sevSymbol = sev === "critical" ? "◆ CRIT"
                         : sev === "warning"  ? "▲ WARN"
                         : "● INFO";
+        // event id is a stable sequential number from the database's auto-increment
+        // primary key. it persists across restarts because sqlite doesn't reset it,
+        // so events continue counting from where they left off
+        const idDisplay = r.id !== undefined && r.id !== null
+            ? `#${r.id}` : "#?";
         return `<tr>
+            <td class="event-num">${idDisplay}</td>
             <td class="age">${ago(r.ts)}</td>
             <td class="${sevClass}">${sevSymbol}</td>
             <td>${escapeHtml(r.type || "")}</td>
@@ -1900,7 +1933,7 @@ function initTestAlarmButton() {
     if (!btn) return;
 
     const originalText = "TRIGGER TEST INCIDENT";
-    const COOLDOWN_MS = 5000;
+    const COOLDOWN_MS = 10000;
 
     // updates the button label to show remaining cooldown seconds
     function updateCountdown() {
@@ -2023,8 +2056,14 @@ async function triggerAlarm(event, launchIncident = true) {
 }
 
 function bootPolling() {
-    tickSnapshot();
-    setInterval(tickSnapshot, REFRESH_MS);
+    tickSnapshot().finally(() => {
+        function scheduleNext() {
+            setTimeout(async () => {
+                try { await tickSnapshot(); } finally { scheduleNext(); }
+            }, REFRESH_MS);
+        }
+        scheduleNext();
+    });
 
     // alarm watcher runs on its own timer, polling for new critical events
     tickAlarmWatcher();

@@ -59,11 +59,27 @@ CREATE TABLE IF NOT EXISTS runs (
     sample_count INTEGER                   -- how many samples this cycle produced
 );
 
--- indexes for the queries the dashboard and analyzers will run most:
--- "give me recent samples for collector X" and "give me samples in a time window"
+-- indexes for the queries the dashboard and analyzers will run most(order matters)
+
+-- window-in-time queries (samples_in_window, latency_history, prune_old_data)
 CREATE INDEX IF NOT EXISTS idx_samples_ts ON samples(ts);
+
+-- per-collector recent-samples queries (recent_samples)
 CREATE INDEX IF NOT EXISTS idx_samples_collector_ts ON samples(collector, ts);
+
+-- ROW_NUMBER partition queries (latest_metric_snapshots, status_snapshot).
+-- this is the index that fixes the multi-second dashboard tick problem
+CREATE INDEX IF NOT EXISTS idx_samples_collector_metric_ts
+    ON samples(collector, metric, ts DESC);
+
+-- recent events ordered by ts (recent_events, recent_events_compact)
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
+
+-- critical event polling (new_critical_events_since via alarm watcher)
+CREATE INDEX IF NOT EXISTS idx_events_severity_id ON events(severity, id);
+
+-- latest_run_per_collector: runs table currently has no indexes at all
+CREATE INDEX IF NOT EXISTS idx_runs_collector_id ON runs(collector, id);
 """
 
 
@@ -218,17 +234,20 @@ def status_snapshot() -> dict:
     with _connect() as conn:
         cur = conn.execute(
             """
-            WITH ranked AS (
-                SELECT *,
-                       ROW_NUMBER() OVER (PARTITION BY metric
-                                          ORDER BY ts DESC) AS rn
+            SELECT s.*
+            FROM samples s
+            INNER JOIN (
+                SELECT metric, MAX(ts) AS max_ts
                 FROM samples
                 WHERE collector IN ('status', 'firewall')
-            )
-            SELECT * FROM ranked WHERE rn = 1
+                GROUP BY metric
+            ) latest
+              ON s.metric = latest.metric
+             AND s.ts     = latest.max_ts
+            WHERE s.collector IN ('status', 'firewall')
             """
         )
-        rows = cur.fetchall()
+        rows = cur.fetchall()    
     out = {}
     for r in rows:
         meta = json.loads(r["meta_json"]) if r["meta_json"] else {}
@@ -242,18 +261,28 @@ def status_snapshot() -> dict:
 
 # fetches the most recent value of each (collector, metric) combination
 def latest_metric_snapshots() -> list[sqlite3.Row]:
-    """The newest sample for each unique (collector, metric) pair."""
+    """The newest sample for each unique (collector, metric) pair.
+
+    Uses a MAX-based join instead of ROW_NUMBER. With the composite index on
+    (collector, metric, ts), the inner subquery becomes one index seek per
+    group instead of a full table scan. Meaningfully faster than the
+    equivalent CTE + ROW_NUMBER approach on tables with tens of thousands
+    of rows.
+    """
     with _connect() as conn:
         cur = conn.execute(
             """
-            WITH ranked AS (
-                SELECT *,
-                       ROW_NUMBER() OVER (PARTITION BY collector, metric
-                                          ORDER BY ts DESC) AS rn
+            SELECT s.*
+            FROM samples s
+            INNER JOIN (
+                SELECT collector, metric, MAX(ts) AS max_ts
                 FROM samples
-            )
-            SELECT * FROM ranked WHERE rn = 1
-            ORDER BY collector, metric
+                GROUP BY collector, metric
+            ) latest
+              ON s.collector = latest.collector
+             AND s.metric    = latest.metric
+             AND s.ts        = latest.max_ts
+            ORDER BY s.collector, s.metric
             """
         )
         return cur.fetchall()
@@ -321,6 +350,7 @@ def recent_events_compact(limit: int = 15) -> list[dict]:
     rows = recent_events(limit=limit)
     return [
         {
+            "id": r["id"],
             "ts": r["ts"],
             "type": r["type"],
             "severity": r["severity"],

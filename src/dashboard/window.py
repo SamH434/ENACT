@@ -989,12 +989,12 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     text-shadow: none;
 }
 
-/* clear-data modal card gets a red border to visually emphasize destructive */
-#clear-data-popup .clear-card {
-    border-color: var(--red);
-    box-shadow: 0 0 60px rgba(0, 0, 0, 0.9),
-                0 0 24px rgba(255, 48, 48, 0.25);
-}
+# /* clear-data modal card gets a red border to visually emphasize destructive */
+# #clear-data-popup .clear-card {
+#     border-color: var(--red);
+#     box-shadow: 0 0 60px rgba(0, 0, 0, 0.9),
+#                 0 0 24px rgba(255, 48, 48, 0.25);
+# }
 #clear-data-popup .title { color: var(--red-bright); text-shadow: var(--glow-red); }
 #clear-data-popup .subtitle { color: var(--red-dim); text-shadow: var(--glow-red); }
 
@@ -1137,6 +1137,52 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     justify-content: center;
     background: rgba(0, 0, 0, 0.55);
     z-index: 800;
+}
+/* clear-data popup shares the same positioning/backdrop structure as info-popup.
+   without these rules, the modal renders inline in the page flow instead of as
+   a floating overlay */
+#clear-data-popup {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.65);
+    z-index: 850;
+}
+#clear-data-popup.hidden { display: none; }
+#clear-data-popup .card {
+    width: 560px;
+    max-width: 82vw;
+    background: var(--bg-panel);
+    padding: 22px 28px 18px;
+    color: var(--amber);
+    box-shadow: 0 0 60px rgba(0, 0, 0, 0.9),
+                0 0 24px rgba(255, 48, 48, 0.25);
+    border: 3px solid var(--red);
+}
+#clear-data-popup .title {
+    color: var(--red-bright);
+    font-weight: bold;
+    letter-spacing: 2px;
+    font-size: 14px;
+    margin-bottom: 4px;
+    text-shadow: var(--glow-red);
+}
+#clear-data-popup .subtitle {
+    color: var(--red-dim);
+    font-size: 11px;
+    letter-spacing: 1px;
+    margin-bottom: 14px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(255, 48, 48, 0.3);
+    text-shadow: var(--glow-red);
+}
+#clear-data-popup .body {
+    color: var(--amber);
+    font-size: 12.5px;
+    line-height: 1.55;
+    margin-bottom: 18px;
 }
 #info-popup.hidden { display: none; }
 #info-popup .card {
@@ -1413,6 +1459,44 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
             <div class="body" id="info-popup-body">-</div>
             <div class="btn-row">
                 <button class="info-close-btn" id="info-popup-close">CLOSE</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- clear data confirmation modal: destructive action with data-stats
+         so the user knows what they're about to delete. also nudges toward
+         EXPORT first as a backup path -->
+    <div id="clear-data-popup" class="hidden">
+        <div class="card clear-card">
+            <div class="title">⌫ CLEAR TELEMETRY DATA</div>
+            <div class="subtitle">DESTRUCTIVE ACTION · NO UNDO</div>
+            <div class="body">
+                <p id="clear-data-stats" style="line-height: 1.6;">loading stats...</p>
+                <p style="color: var(--cyan); margin-top: 14px; line-height: 1.5;">
+                    Consider <strong>exporting your data first</strong> so you have
+                    a backup of the current session before clearing.
+                </p>
+                <div style="margin-top: 12px;">
+                    <label style="display: block; color: var(--amber); margin-bottom: 8px;">
+                        <input type="checkbox" id="clear-keep-events" checked>
+                        Keep event history (recommended)
+                    </label>
+                    <div style="color: var(--text-mute); font-size: 11px; line-height: 1.4;">
+                        Events are the interesting historical record. Samples and
+                        runs are the bulk data that slows things down over time.
+                    </div>
+                </div>
+            </div>
+            <div class="btn-row" style="gap: 10px; display: flex; justify-content: flex-end;">
+                <button class="info-close-btn" id="clear-export-first-btn"
+                        style="border-color: var(--amber); color: var(--amber);">
+                    ⇩ EXPORT FIRST
+                </button>
+                <button class="info-close-btn" id="clear-data-cancel-btn">CANCEL</button>
+                <button class="info-close-btn" id="clear-data-confirm-btn"
+                        style="border-color: var(--red); color: var(--red);">
+                    CONFIRM CLEAR
+                </button>
             </div>
         </div>
     </div>
@@ -2435,7 +2519,7 @@ def main() -> None:
     )
     # maximize on show: fills the monitor but keeps standard window chrome
     window.events.shown += lambda: window.maximize()
-    webview.start(gui="edgechromium")
+    webview.start(gui="edgechromium", debug=True)
 
 
 if __name__ == "__main__":

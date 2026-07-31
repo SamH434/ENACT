@@ -1498,19 +1498,34 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
             <div class="subtitle">DESTRUCTIVE ACTION - NO UNDO</div>
             <div class="body">
                 <p id="clear-data-stats" style="line-height: 1.6;">loading stats...</p>
-                <p style="color: var(--cyan); margin-top: 14px; line-height: 1.5;">
-                    Consider <strong>exporting your data first</strong> so you have
-                    a backup of the current session before clearing.
+
+                <!-- expanded blue explanation: export before clearing AND why IDs matter.
+                    merges the two previous callouts into one clearer message about the
+                    relationship between exports, IDs, and cross-referencing -->
+                <p style="color: var(--cyan); margin-top: 14px; line-height: 1.6;">
+                    <strong>Export your data first.</strong> Clearing wipes all samples,
+                    runs, events, and incidents from the live database. Event and incident
+                    IDs are <strong>persistent</strong> - the next incident after clearing
+                    will be one higher than your current highest, not #1. Your exported
+                    log file is the only way to cross-reference an incident ID against
+                    the context it appeared in.
                 </p>
-                <div style="margin-top: 12px;">
-                    <label style="display: block; color: var(--amber); margin-bottom: 8px;">
-                        <input type="checkbox" id="clear-keep-events" checked>
-                        Keep event log and incidents (recommended)
+
+                <!-- opt-in checkbox for resetting IDs. default UNCHECKED to match honest
+                    wipe-and-preserve-continuity semantics. checked -> full reset for
+                    users who want a truly fresh start -->
+                <div style="margin-top: 14px; padding: 10px 12px;
+                            background: rgba(215, 175, 0, 0.05);
+                            border: 1px solid rgba(215, 175, 0, 0.25);">
+                    <label style="display: block; color: var(--amber); margin-bottom: 4px; cursor: pointer;">
+                        <input type="checkbox" id="clear-reset-ids">
+                        Also reset event/incident numbering back to #1
                     </label>
-                    <div style="color: var(--text-mute); font-size: 11px; line-height: 1.4;">
-                        The event log and incident history are the same thing — the notable
-                        detections your analyzers made. They're small and worth keeping across
-                        sessions. Uncheck to fully wipe everything including your incident history.
+                    <div style="color: var(--text-mute); font-size: 11px; line-height: 1.45;">
+                        Off by default. Persistent IDs give you continuity across sessions
+                        — a good default for cross-referencing exports. Check this only if
+                        you want a truly fresh installation (e.g. handing the tool to
+                        someone else).
                     </div>
                 </div>
             </div>

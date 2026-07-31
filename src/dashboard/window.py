@@ -166,11 +166,9 @@ class DashboardAPI:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
-    # deletes samples and runs but preserves events by default, since events
-    # are the "interesting" historical data and are already tiny (hundreds of
-    # rows, not tens of thousands). keeping events means the incident log stays
-    # populated after a clear. destructive: no undo
-    def clear_telemetry_data(self, keep_events: bool = True) -> dict:
+    # wipes all telemetry data (samples, runs, events) and resets the
+    # auto-increment counters so the next event/sample starts at #1
+    def clear_telemetry_data(self) -> dict:
         try:
             import sqlite3
 
@@ -187,20 +185,18 @@ class DashboardAPI:
 
                 conn.execute("DELETE FROM samples")
                 conn.execute("DELETE FROM runs")
-                if not keep_events:
-                    conn.execute("DELETE FROM events")
+                conn.execute("DELETE FROM events")
                 conn.commit()
 
+            # VACUUM reclaims disk space; must run outside a transaction
             with sqlite3.connect(str(database.DB_PATH)) as conn:
                 conn.execute("VACUUM")
 
-            events_after = 0 if not keep_events else events_before
             return {
                 "ok": True,
                 "samples_deleted": samples_before,
                 "runs_deleted": runs_before,
-                "events_deleted": events_before - events_after,
-                "events_kept": events_after,
+                "events_deleted": events_before,
             }
         except Exception as e:
             return {"ok": False, "error": str(e)}
@@ -258,13 +254,17 @@ class DashboardAPI:
             buf.write(f"  (metric snapshot query failed: {e})\n")
 
         # event log: last 200 events (bounded)
-        section("EVENT LOG - MOST RECENT 200 EVENTS")
+        section("EVENT LOG · MOST RECENT 200 EVENTS")
         try:
             events = database.recent_events(limit=200)
             if not events:
                 buf.write("  (no events recorded)\n")
             for e in events:
-                buf.write(f"[{e['ts']}] {e['severity'].upper():8s} "
+                # event id is persistent across clears, including it in the
+                # export lets users cross-reference incident numbers even
+                # after their in app history is wiped
+                event_id = e['id'] if e['id'] is not None else '?'
+                buf.write(f"#{event_id:<6} [{e['ts']}] {e['severity'].upper():8s} "
                          f"{e['type']:20s} :: {e['summary']}\n")
         except Exception as e:
             buf.write(f"  (event log query failed: {e})\n")
@@ -1023,8 +1023,22 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
                     <div style="color: var(--text-mute); font-size: 11px; line-height: 1.5;">
                         • All raw samples (network measurements)<br>
                         • All analyzer runs (collector cycle history)<br>
-                        • All events and incidents (detected anomalies)<br>
-                        • Event/incident numbering resets to #1
+                        • All events and incidents (detected anomalies)
+                    </div>
+                </div>
+
+                <!-- persistent IDs note: emphasize that IDs don't reset, so exporting is
+                    the only way to preserve context for old incidents you might reference later -->
+                <div style="margin-top: 10px; padding: 10px 12px; background: rgba(60, 200, 120, 0.06); border: 1px solid rgba(60, 200, 120, 0.35);">
+                    <div style="color: var(--green-dim); font-weight: bold; margin-bottom: 4px;">
+                        ⚠ IMPORTANT: READ BEFORE EXPORT
+                    </div>
+                    <div style="color: var(--text-mute); font-size: 11px; line-height: 1.5;">
+                        Event and incident IDs do NOT reset after clearing. If your current
+                        event log shows #742, the next incident after wiping will be #743.
+                        This means <strong style="color: var(--green-dim);">only your
+                        exported log will let you cross-reference incident numbers</strong>
+                        against their original context. Use EXPORT FIRST before continuing.
                     </div>
                 </div>
             </div>
@@ -1093,7 +1107,7 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
 #incident-log-popup .list::-webkit-scrollbar-thumb { background: rgba(255, 48, 48, 0.25); }
 #incident-log-popup .incident-row {
     display: grid;
-    grid-template-columns: 90px 130px 1fr auto;
+    grid-template-columns: 60px 90px 130px 1fr auto;
     gap: 10px;
     align-items: center;
     padding: 8px 10px;
@@ -1102,6 +1116,13 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     cursor: pointer;
     transition: all 0.12s ease;
     text-shadow: var(--glow-red);
+}
+#incident-log-popup .incident-row .incident-id {
+    color: var(--green-dim);
+    font-weight: bold;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    text-shadow: var(--glow-green);
 }
 #incident-log-popup .incident-row:hover {
     background: rgba(255, 48, 48, 0.08);
@@ -1689,6 +1710,7 @@ function renderIncidentList(events) {
     }
     list.innerHTML = events.map(ev => `
         <div class="incident-row" data-event-id="${ev.id}">
+            <div class="incident-id">#${ev.id ?? "?"}</div>
             <div class="ts">${formatCompactTime(ev.ts)}</div>
             <div class="type">${escapeHtml((ev.type || "").toUpperCase())}</div>
             <div class="summary">${escapeHtml(ev.summary || "")}</div>
@@ -2422,9 +2444,10 @@ function initClearDataButton() {
     confirmBtn.addEventListener("click", async () => {
         confirmBtn.disabled = true;
         confirmBtn.textContent = "CLEARING...";
-        const keepEvents = keepEventsCheckbox.checked;
         try {
-            const result = await window.pywebview.api.clear_telemetry_data(keepEvents);
+            // full wipe every time: no more partial-clear option. keeps the mental model
+            // simple — "clear" means clear.
+            const result = await window.pywebview.api.clear_telemetry_data();
             if (result && result.ok) {
                 confirmBtn.textContent = "CLEARED";
                 setTimeout(async () => {

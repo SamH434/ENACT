@@ -76,7 +76,7 @@ class IncidentAPI:
                 "ts": now_iso,
                 "type": "test_incident",
                 "severity": "critical",
-                "summary": ("TEST · This is a synthetic incident triggered "
+                "summary": ("TEST : This is a synthetic incident triggered "
                             "from the dashboard. No real anomaly detected."),
             },
             "evidence": {
@@ -115,7 +115,7 @@ _INCIDENT_HTML = r"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
-<title>ENACT · Incident</title>
+<title>ENACT : Incident</title>
 <style>
 :root {
     --bg: #000000;
@@ -411,7 +411,7 @@ table.samples td.ts  { color: var(--cyan); font-size: 11px; }
 
         <!-- bottom (full width): live sample stream since event -->
         <div class="panel" style="grid-column: 1 / -1;">
-            <span class="panel-title">[ LIVE SAMPLES · SINCE ONSET ]</span>
+            <span class="panel-title">[ LIVE SAMPLES : SINCE ONSET ]</span>
             <div class="scroll-area">
                 <table class="samples" id="samples-table">
                     <thead><tr>
@@ -430,7 +430,7 @@ table.samples td.ts  { color: var(--cyan); font-size: 11px; }
 
     <!-- action bar -->
     <div id="actions">
-        <span class="hint">INCIDENT WINDOW · UPDATES LIVE · ACKNOWLEDGE TO CLOSE</span>
+        <span class="hint">INCIDENT WINDOW - UPDATES LIVE - ACKNOWLEDGE TO CLOSE</span>
         <button class="btn" id="ack-btn">MARK ACKNOWLEDGED</button>
     </div>
 
@@ -593,7 +593,7 @@ function renderEvidence(evidence) {
                 items.push(`<li class="nested">
                     <span class="k">&nbsp;&nbsp;${escapeHtml(host)}</span>
                     <span class="v ${isHot ? 'hot' : ''}">
-                        ${success} ok · ${failure} fail
+                        ${success} ok - ${failure} fail
                     </span>
                 </li>`);
             }
@@ -677,7 +677,7 @@ function renderSamples(samples) {
             <td>${escapeHtml(p.collector.toUpperCase())}</td>
             <td>${escapeHtml(p.metric)}</td>
             <td class="${valClass}">${escapeHtml(formatValue(p.value))}</td>
-            <td>${escapeHtml(contextBits.join(" · "))}</td>
+            <td>${escapeHtml(contextBits.join(" - "))}</td>
         </tr>`;
     }).join("");
 }
@@ -742,7 +742,7 @@ def main() -> None:
 
     api = IncidentAPI(event_id)
     webview.create_window(
-        title=f"ENACT · INCIDENT #{event_id}",
+        title=f"ENACT : INCIDENT #{event_id}",
         html=html,
         js_api=api,
         width=WINDOW_WIDTH,

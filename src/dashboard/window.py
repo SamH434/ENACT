@@ -48,9 +48,9 @@ TRACE_COLORS = {
 # human-friendly labels for the chart legend
 # the IPs are truth, the names are meaning
 TRACE_LABELS = {
-    "1.1.1.1": "Cloudflare · 1.1.1.1",
-    "8.8.8.8": "Google · 8.8.8.8",
-    "9.9.9.9": "Quad9 · 9.9.9.9",
+    "1.1.1.1": "Cloudflare - 1.1.1.1",
+    "8.8.8.8": "Google - 8.8.8.8",
+    "9.9.9.9": "Quad9 - 9.9.9.9",
 }
 
 """
@@ -219,7 +219,7 @@ class DashboardAPI:
             buf.write("=" * 70 + "\n")
 
         # header
-        buf.write("ENACT · Engine for Network Anomaly, Condition, and Telemetry\n")
+        buf.write("ENACT - Engine for Network Anomaly, Condition, and Telemetry\n")
         buf.write("Diagnostic report\n")
         buf.write(f"Generated: {datetime.now().isoformat(timespec='seconds')}\n")
 
@@ -235,7 +235,7 @@ class DashboardAPI:
             buf.write(f"  (status snapshot failed: {e})\n")
 
         # collector health
-        section("COLLECTOR HEALTH · MOST RECENT CYCLE")
+        section("COLLECTOR HEALTH - MOST RECENT CYCLE")
         try:
             for row in database.latest_run_per_collector():
                 buf.write(f"  {row['collector']:15s} "
@@ -258,7 +258,7 @@ class DashboardAPI:
             buf.write(f"  (metric snapshot query failed: {e})\n")
 
         # event log: last 200 events (bounded)
-        section("EVENT LOG · MOST RECENT 200 EVENTS")
+        section("EVENT LOG - MOST RECENT 200 EVENTS")
         try:
             events = database.recent_events(limit=200)
             if not events:
@@ -271,7 +271,7 @@ class DashboardAPI:
 
         # recent samples tail per collector: last 50 rows each, so the report
         # gives context on what was happening without dumping everything
-        section("RECENT SAMPLES · LAST 50 PER COLLECTOR")
+        section("RECENT SAMPLES - LAST 50 PER COLLECTOR")
         try:
             for collector in ["connectivity", "dns", "route",
                               "wifi", "status"]:
@@ -1009,21 +1009,22 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     <div id="clear-data-popup" class="hidden">
         <div class="card clear-card">
             <div class="title">⌫ CLEAR TELEMETRY DATA</div>
-            <div class="subtitle">DESTRUCTIVE ACTION · NO UNDO</div>
+            <div class="subtitle">DESTRUCTIVE ACTION - NO UNDO</div>
             <div class="body">
                 <p id="clear-data-stats" style="line-height: 1.6;">loading stats...</p>
                 <p style="color: var(--cyan); margin-top: 14px; line-height: 1.5;">
                     Consider <strong>exporting your data first</strong> so you have
                     a backup of the current session before clearing.
                 </p>
-                <div style="margin-top: 12px;">
-                    <label style="display: block; color: var(--amber); margin-bottom: 8px;">
-                        <input type="checkbox" id="clear-keep-events" checked>
-                        Keep event history (recommended)
-                    </label>
-                    <div style="color: var(--text-mute); font-size: 11px; line-height: 1.4;">
-                        Events are the interesting historical record. Samples and
-                        runs are the bulk data that slows things down over time.
+                <div style="margin-top: 12px; padding: 10px 12px; background: rgba(255, 48, 48, 0.06); border: 1px solid rgba(255, 48, 48, 0.2);">
+                    <div style="color: var(--red-bright); font-weight: bold; margin-bottom: 4px;">
+                        This wipes everything:
+                    </div>
+                    <div style="color: var(--text-mute); font-size: 11px; line-height: 1.5;">
+                        • All raw samples (network measurements)<br>
+                        • All analyzer runs (collector cycle history)<br>
+                        • All events and incidents (detected anomalies)<br>
+                        • Event/incident numbering resets to #1
                     </div>
                 </div>
             </div>
@@ -1447,7 +1448,7 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     <div id="incident-log-popup" class="hidden">
         <div class="card">
             <div class="title">◆ INCIDENT LOG</div>
-            <div class="subtitle">RECENT CRITICAL EVENTS · CLICK TO REOPEN</div>
+            <div class="subtitle">RECENT CRITICAL EVENTS - CLICK TO REOPEN</div>
             <div class="list" id="incident-log-list"></div>
             <div class="btn-row">
                 <button class="info-close-btn" id="incident-log-close">CLOSE</button>
@@ -1473,7 +1474,7 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     <div id="clear-data-popup" class="hidden">
         <div class="card clear-card">
             <div class="title">⌫ CLEAR TELEMETRY DATA</div>
-            <div class="subtitle">DESTRUCTIVE ACTION · NO UNDO</div>
+            <div class="subtitle">DESTRUCTIVE ACTION - NO UNDO</div>
             <div class="body">
                 <p id="clear-data-stats" style="line-height: 1.6;">loading stats...</p>
                 <p style="color: var(--cyan); margin-top: 14px; line-height: 1.5;">
@@ -1535,7 +1536,7 @@ const PANEL_INFO = {
     },
     latency: {
         title: "LATENCY TRACE LIVE REPORT",
-        body: "Live ping latency to three public DNS resolvers: Cloudflare, Google, and Quad9. Uses ICMP echo. If the chart shows 'NO DATA · ICMP BLOCKED OR UNREACHABLE', your network drops ping packets - common with VPNs and corporate firewalls - and this specific chart can't gather data. Other collectors (DNS resolution timing, route tracing) still work under those conditions.",
+        body: "Live ping latency to three public DNS resolvers: Cloudflare, Google, and Quad9. Uses ICMP echo. If the chart shows 'NO DATA - ICMP BLOCKED OR UNREACHABLE', your network drops ping packets - common with VPNs and corporate firewalls - and this specific chart can't gather data. Other collectors (DNS resolution timing, route tracing) still work under those conditions.",
     },
 };
 
@@ -1998,7 +1999,7 @@ function classifyChartState(snapshot) {
     if (connectivityAgeSec > 120) {
         overlay.className = "";
         headline.textContent = "NO DATA";
-        reason.textContent = "STALE · " + Math.floor(connectivityAgeSec / 60) + "M AGO";
+        reason.textContent = "STALE - " + Math.floor(connectivityAgeSec / 60) + "M AGO";
         return;
     }
 
@@ -2259,13 +2260,13 @@ function initTestAlarmButton() {
             clearInterval(testAlarmCountdownTimer);
             testAlarmCountdownTimer = null;
         } else {
-            btn.textContent = `COOLDOWN · ${remaining}s`;
+            btn.textContent = `COOLDOWN - ${remaining}s`;
         }
     }
 
     btn.addEventListener("click", async () => {
         // hard guard: if we're inside cooldown, ignore. clicks during
-        // "COOLDOWN · 4s" state are silently discarded
+        // "COOLDOWN - 4s" state are silently discarded
         if (Date.now() < testAlarmCooldownUntil) return;
 
         // enter cooldown state immediately, before any async work.
@@ -2282,7 +2283,7 @@ function initTestAlarmButton() {
         triggerAlarm({
             id: -1,
             type: "test_incident",
-            summary: "TEST · Synthetic incident from dashboard button",
+            summary: "TEST - Synthetic incident from dashboard button",
         }, false);
 
         // launch the incident window subprocess
@@ -2350,7 +2351,7 @@ async function triggerAlarm(event, launchIncident = true) {
 
     const overlay = document.getElementById("alarm-overlay");
     document.getElementById("alarm-overlay-summary").textContent =
-        `${event.type.toUpperCase()} · ${event.summary}`;
+        `${event.type.toUpperCase()} - ${event.summary}`;
     overlay.classList.remove("hidden");
     const strobe = overlay.querySelector(".alarm-strobe");
     strobe.style.animation = "none";
@@ -2382,7 +2383,6 @@ function initClearDataButton() {
     const cancelBtn = document.getElementById("clear-data-cancel-btn");
     const confirmBtn = document.getElementById("clear-data-confirm-btn");
     const exportFirstBtn = document.getElementById("clear-export-first-btn");
-    const keepEventsCheckbox = document.getElementById("clear-keep-events");
 
     btn.addEventListener("click", async (e) => {
         e.stopPropagation();

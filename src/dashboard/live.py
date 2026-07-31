@@ -172,7 +172,7 @@ def _header_panel(critical_active: bool) -> Panel:
     if critical_active:
         title = Text()
         title.append("ENACT", style=f"bold {COLOR_BG_BLACK} on {COLOR_RED}")
-        title.append("  CODE: 102  ·  EMERGENCY  ", style=f"bold {COLOR_RED} on {COLOR_BG_BLACK}")
+        title.append("  CODE: 102  -  EMERGENCY  ", style=f"bold {COLOR_RED} on {COLOR_BG_BLACK}")
         title.append(f"  {date}  ", style=f"{COLOR_RED_DIM}")
         border = COLOR_RED
     else:
@@ -217,9 +217,9 @@ def _clock_panel(critical_active: bool) -> Panel:
 def _footer_panel(critical_active: bool) -> Panel:
     if critical_active:
         text = Text(
-            "  CAUTION · CAUTION · CAUTION · "
-            "ANOMALY ACTIVE · INSPECT EVENT LOG · "
-            "CAUTION · CAUTION · CAUTION  ",
+            "  CAUTION - CAUTION - CAUTION - "
+            "ANOMALY ACTIVE - INSPECT EVENT LOG - "
+            "CAUTION - CAUTION - CAUTION  ",
             style=f"bold {COLOR_RED}",
             justify="center",
         )
@@ -356,7 +356,7 @@ def _events_panel(critical_active: bool) -> Panel:
             )
 
     border = COLOR_RED if critical_active else COLOR_AMBER
-    title_prefix = "[ EVENT LOG · ALARM ]" if critical_active else "[ EVENT LOG · PHASE 4 ]"
+    title_prefix = "[ EVENT LOG - ALARM ]" if critical_active else "[ EVENT LOG - PHASE 4 ]"
     return Panel(
         table,
         title=title_prefix,

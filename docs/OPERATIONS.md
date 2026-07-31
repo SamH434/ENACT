@@ -1,6 +1,6 @@
 # ENACT: Laws of Operation
 
-**Version 1.0 · 2026**
+**Version 1.0 2026**
 
 This document defines what ENACT considers an anomaly, why, and at what
 severity. It exists so operators (and reviewers) can evaluate whether ENACT
@@ -338,7 +338,7 @@ A truthful spec includes what the tool *cannot* see.
 
 - **ICMP-filtered environments** (VPNs, corporate networks). Ping failures
   in these environments are not "network broken" but "network dropping
-  probes." ENACT shows this honestly via the `NO DATA · ICMP BLOCKED`
+  probes." ENACT shows this honestly via the `NO DATA ICMP BLOCKED`
   overlay rather than pretending to have measured what it can't.
 - **Application-layer issues.** HTTPS handshake failures, TLS certificate
   errors, application timeouts, ENACT does not measure these.

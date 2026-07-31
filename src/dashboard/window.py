@@ -989,15 +989,6 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     text-shadow: none;
 }
 
-# /* clear-data modal card gets a red border to visually emphasize destructive */
-# #clear-data-popup .clear-card {
-#     border-color: var(--red);
-#     box-shadow: 0 0 60px rgba(0, 0, 0, 0.9),
-#                 0 0 24px rgba(255, 48, 48, 0.25);
-# }
-#clear-data-popup .title { color: var(--red-bright); text-shadow: var(--glow-red); }
-#clear-data-popup .subtitle { color: var(--red-dim); text-shadow: var(--glow-red); }
-
 /* export button gets amber styling to distinguish from the red incident button.
    still uses the same "hover turns red" language as everything else */
 .panel-title-btn.export-btn {
@@ -1142,6 +1133,19 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
    without these rules, the modal renders inline in the page flow instead of as
    a floating overlay */
 #clear-data-popup {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.65);
+    z-index: 850;
+}
+/* incident log popup: same positioning as info-popup and clear-data-popup.
+   without these top-level rules, the popup renders inline in the page flow
+   instead of as a floating overlay (the bug where it appeared in the bottom
+   corner of the dashboard) */
+#incident-log-popup {
     position: fixed;
     inset: 0;
     display: flex;
@@ -1479,11 +1483,12 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
                 <div style="margin-top: 12px;">
                     <label style="display: block; color: var(--amber); margin-bottom: 8px;">
                         <input type="checkbox" id="clear-keep-events" checked>
-                        Keep event history (recommended)
+                        Keep event log and incidents (recommended)
                     </label>
                     <div style="color: var(--text-mute); font-size: 11px; line-height: 1.4;">
-                        Events are the interesting historical record. Samples and
-                        runs are the bulk data that slows things down over time.
+                        The event log and incident history are the same thing — the notable
+                        detections your analyzers made. They're small and worth keeping across
+                        sessions. Uncheck to fully wipe everything including your incident history.
                     </div>
                 </div>
             </div>
@@ -2422,10 +2427,14 @@ function initClearDataButton() {
             const result = await window.pywebview.api.clear_telemetry_data(keepEvents);
             if (result && result.ok) {
                 confirmBtn.textContent = "CLEARED";
-                setTimeout(() => {
+                setTimeout(async () => {
                     popup.classList.add("hidden");
                     confirmBtn.disabled = false;
                     confirmBtn.textContent = "CONFIRM CLEAR";
+                    // force an immediate snapshot refresh so the dashboard's
+                    // event log reflects the clear right away, instead of waiting
+                    // for the next scheduled poll (which could be up to 1s away)
+                    try { await tickSnapshot(); } catch (e) { /* ignore */ }
                 }, 1500);
             } else {
                 confirmBtn.textContent = "FAILED";

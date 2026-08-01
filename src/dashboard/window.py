@@ -166,9 +166,10 @@ class DashboardAPI:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
-    # wipes all telemetry data (samples, runs, events) and resets the
-    # auto-increment counters so the next event/sample starts at #1
-    def clear_telemetry_data(self) -> dict:
+    # wipes all telemetry data (samples, runs, events). optionally resets the
+    # auto increment counters so IDs restart at 1. 
+    def clear_telemetry_data(self, reset_ids: bool = False) -> dict:
+        print(f"[clear_telemetry_data] called with reset_ids={reset_ids} type={type(reset_ids).__name__}")
         try:
             import sqlite3
 
@@ -186,6 +187,15 @@ class DashboardAPI:
                 conn.execute("DELETE FROM samples")
                 conn.execute("DELETE FROM runs")
                 conn.execute("DELETE FROM events")
+
+                if reset_ids:
+                    # sqlite_sequence is a built-in table that stores the current
+                    # max for each AUTOINCREMENT column. deleting entries here
+                    # makes the next INSERT use id=1 for the affected tables
+                    conn.execute(
+                        "DELETE FROM sqlite_sequence "
+                        "WHERE name IN ('samples', 'runs', 'events')"
+                    )
                 conn.commit()
 
             # VACUUM reclaims disk space; must run outside a transaction
@@ -197,6 +207,7 @@ class DashboardAPI:
                 "samples_deleted": samples_before,
                 "runs_deleted": runs_before,
                 "events_deleted": events_before,
+                "ids_reset": reset_ids,
             }
         except Exception as e:
             return {"ok": False, "error": str(e)}
@@ -1523,7 +1534,7 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
                     </label>
                     <div style="color: var(--text-mute); font-size: 11px; line-height: 1.45;">
                         Off by default. Persistent IDs give you continuity across sessions
-                        — a good default for cross-referencing exports. Check this only if
+                        - a good default for cross-referencing exports. Check this only if
                         you want a truly fresh installation (e.g. handing the tool to
                         someone else).
                     </div>
@@ -2425,6 +2436,7 @@ function initClearDataButton() {
         e.stopPropagation();
         stats.textContent = "loading stats...";
         popup.classList.remove("hidden");
+        
         try {
             const s = await window.pywebview.api.get_data_stats();
             if (s && s.ok) {
@@ -2459,9 +2471,10 @@ function initClearDataButton() {
     confirmBtn.addEventListener("click", async () => {
         confirmBtn.disabled = true;
         confirmBtn.textContent = "CLEARING...";
+        const resetIds = document.getElementById("clear-reset-ids").checked;
         try {
             // full wipe every time: no more partial-clear option. keeps the mental model
-            // simple — "clear" means clear.
+            // simple - "clear" means clear.
             const result = await window.pywebview.api.clear_telemetry_data();
             if (result && result.ok) {
                 confirmBtn.textContent = "CLEARED";

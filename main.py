@@ -1,8 +1,6 @@
 """
-ENACT (Engine for Network Anomaly, Condition, and Telemetry)
-
-Real entrypoint. Builds the four collectors, registers them with the scheduler
-at their own intervals, and runs until Ctrl+C.
+Builds the four collectors, registers them with the scheduler
+at their own intervals.
 
 Intervals are deliberately different to match each collector's cost:
     connectivity: frequent, it's cheap and the most time-sensitive signal

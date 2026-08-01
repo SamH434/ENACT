@@ -2475,9 +2475,10 @@ function initClearDataButton() {
         try {
             // full wipe every time: no more partial-clear option. keeps the mental model
             // simple - "clear" means clear.
-            const result = await window.pywebview.api.clear_telemetry_data();
+            const result = await window.pywebview.api.clear_telemetry_data(resetIds);
             if (result && result.ok) {
                 confirmBtn.textContent = "CLEARED";
+                lastAlarmedId = null;
                 setTimeout(async () => {
                     popup.classList.add("hidden");
                     confirmBtn.disabled = false;

@@ -597,6 +597,20 @@ td.event-num {
     text-shadow: var(--glow-cyan);
 }
 
+/* countdown to next collector cycle: cyan for normal (time remaining),
+   amber-orange for overdue (should have cycled by now but hasn't) */
+td.next-cycle {
+    color: var(--cyan-dim);
+    font-size: 12px;
+    letter-spacing: 0.5px;
+    text-shadow: var(--glow-cyan);
+}
+td.next-cycle.overdue {
+    color: var(--amber-bright);
+    font-weight: bold;
+    text-shadow: var(--glow-amber);
+}
+
 td.source { color: var(--cyan); }
 td.age    { color: var(--cyan); font-size: 12px; }
 td.age.stalled { color: var(--red); font-weight: bold; text-shadow: var(--glow-red); }
@@ -614,6 +628,7 @@ td.value             { text-shadow: var(--glow-amber); }
 .summary-info        { text-shadow: var(--glow-cyan); }
 .summary-warning     { text-shadow: var(--glow-amber); }
 .summary-critical    { text-shadow: var(--glow-red); }
+
 
 /* value boxes in event summaries get a slight glow too, keyed by class */
 .val-box.val-hash    { text-shadow: var(--glow-cyan); }
@@ -1409,10 +1424,9 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
             <span class="panel-title">[ COLLECTOR HEALTH MONITOR ] <button class="info-btn" data-info="health">i</button></span>
             <table id="tbl-health">
                 <thead><tr>
-                    <th>UNIT</th><th>LAST</th><th>STATUS</th>
-                    <th>DUR</th><th>SAMPLES</th>
+                    <th>UNIT</th><th>LAST</th><th>NEXT</th><th>STATUS</th><th>DUR</th><th>SAMPLES</th>
                 </tr></thead>
-                <tbody><tr><td colspan="5" class="loading">[ initializing ]</td></tr></tbody>
+                <tbody><tr><td colspan="6" class="loading">[ initializing ]</td></tr></tbody>
             </table>
         </div>
 
@@ -1780,37 +1794,41 @@ function tickClock() {
         `${dayName}, ${monthName}. ${dayOfMonth}`;
 }
 
-/* expected max age per collector before we consider it stalled. these mirror
-   the intervals in main.py, we go 2x the expected interval to allow for
-   normal cycle jitter. if the actual "last cycle" age exceeds this, the LAST
-   column turns red as a stall indicator */
+/* stall threshold: last cycle older than this = collector likely dead.
+   this doubles as our "expected interval" for the countdown display */
 const COLLECTOR_STALL_THRESHOLD_SEC = {
-    connectivity: 60,       // 30s interval * 2
-    dns: 120,               // 60s interval * 2
-    route: 600,             // 300s interval * 2
-    wifi: 240,              // 120s interval * 2
-    status: 30,             // 15s interval * 2
-    firewall: 120,          // 60s interval * 2
+    connectivity: 60,
+    dns: 120,
+    route: 600,
+    wifi: 240,
+    status: 30,
+    firewall: 120,
 };
 
-/* updates the perf readout with the most recent snapshot query time.
-   thresholds map to color-coded severity so a slow database becomes visible
-   to the user without an intrusive popup */
-function updatePerfReadout(ms) {
-    const el = document.getElementById("perf-readout");
-    if (!el) return;
-    const rounded = Math.round(ms);
-    el.textContent = `snapshot: ${rounded}ms`;
-    el.classList.remove("ok", "mid", "bad");
-    if (rounded < 100)      el.classList.add("ok");
-    else if (rounded < 500) el.classList.add("mid");
-    else                    el.classList.add("bad");
+/* actual expected interval per collector, used for countdown-to-next.
+   this mirrors the interval_sec values in main.py — if those change, update here */
+const COLLECTOR_INTERVAL_SEC = {
+    connectivity: 30,
+    dns: 60,
+    route: 300,
+    wifi: 120,
+    status: 15,
+    firewall: 60,
+};
+
+// converts remaining seconds into a compact display: "12s", "1m 30s"
+function formatNextCycle(remainingSec) {
+    if (remainingSec <= 0) return "now";
+    if (remainingSec < 60) return `${Math.round(remainingSec)}s`;
+    const mins = Math.floor(remainingSec / 60);
+    const secs = Math.round(remainingSec % 60);
+    return `${mins}m ${secs}s`;
 }
 
 function renderHealth(rows) {
     const tbody = document.querySelector("#tbl-health tbody");
     if (!rows || rows.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" class="loading">[ no data yet ]</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="loading">[ no data yet ]</td></tr>`;
         return;
     }
     tbody.innerHTML = rows.map(r => {
@@ -1818,16 +1836,20 @@ function renderHealth(rows) {
         const statusLabel = r.status === "ok" ? "● NORMAL" : "● ERROR";
         const dur = formatDuration(r.duration_ms);
 
-        // check if this collector has stalled: last cycle older than 2x its interval
         const ageSec = r.ts
             ? (Date.now() - new Date(r.ts).getTime()) / 1000 : 0;
         const threshold = COLLECTOR_STALL_THRESHOLD_SEC[r.collector] || 120;
         const isStalled = ageSec > threshold;
         const ageClass = isStalled ? "age stalled" : "age";
 
+        const interval = COLLECTOR_INTERVAL_SEC[r.collector] || 60;
+        const nextInSec = Math.max(0, interval - ageSec);
+        const nextClass = nextInSec === 0 ? "next-cycle overdue" : "next-cycle";
+
         return `<tr>
             <td class="source">${escapeHtml((r.collector || "?").toUpperCase())}</td>
             <td class="${ageClass}">${ago(r.ts)}</td>
+            <td class="${nextClass}">${formatNextCycle(nextInSec)}</td>
             <td class="${statusClass}">${statusLabel}</td>
             <td class="value-left">${dur}</td>
             <td class="value-left">${r.sample_count ?? 0}</td>
@@ -2580,7 +2602,23 @@ def main() -> None:
     )
     # maximize on show: fills the monitor but keeps standard window chrome
     window.events.shown += lambda: window.maximize()
-    webview.start(gui="edgechromium", debug=True)
+    webview.start(gui="edgechromium") # add debug=True to enable DevTools and remote debugging here
+
+    # # TODO: check inspect element test
+    # # debug mode: enable DevTools access, remote debugging port, and inspect
+    # # element. off by default because it's not needed for normal use and
+    # # (mildly) enlarges the local attack surface via the debug port
+    # parser = argparse.ArgumentParser(
+    #     description="ENACT dashboard window",
+    #     add_help=False,  # add_help=False lets pywebview's own args pass through
+    # )
+    # parser.add_argument("--debug", action="store_true",
+    #                     help="enable DevTools and remote debugging")
+    # args, _ = parser.parse_known_args()
+    # debug_enabled = args.debug or os.environ.get("ENACT_DEBUG") == "1"
+
+    # if debug_enabled:
+    #     print("[ENACT] debug mode ENABLED - DevTools available (F12)")
 
 
 if __name__ == "__main__":

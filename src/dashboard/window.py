@@ -2174,6 +2174,7 @@ function initChart() {
         backgroundColor: TRACE_COLORS[target] + "20",
         borderWidth: 1.5,
         pointRadius: 0,
+        pointHoverRadius: 0
         tension: 0.35,
         cubicInterpolationMode: "monotone",
         fill: false,
@@ -2184,11 +2185,14 @@ function initChart() {
         data: { datasets },
         plugins: [lineGlowPlugin],
         options: {
+            interaction: { mode: null, intersect: false },
+            events: [],
             animation: false,
             responsive: true,
             maintainAspectRatio: false,
             interaction: { intersect: false },
             plugins: {
+                tooltip: { enabled: false },
                 legend: {
                     display: true,
                     position: "top",

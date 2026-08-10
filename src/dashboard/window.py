@@ -62,6 +62,35 @@ all presentation.
 """
 class DashboardAPI:
 
+    # forces a specific collector to run one cycle immediately in a background
+    # thread. safer than modifying the scheduler because it's fully additive.
+    def force_collector_refresh(self, collector_name: str) -> dict:
+        import threading
+
+        allowed = {
+            "status": "src.collectors.status.StatusCollector",
+            "firewall": "src.collectors.firewall.FirewallCollector",
+        }
+        if collector_name not in allowed:
+            return {"ok": False, "error": f"unknown collector: {collector_name}"}
+
+        def _run():
+            try:
+                if collector_name == "status":
+                    from src.collectors.status import StatusCollector
+                    collector = StatusCollector()
+                elif collector_name == "firewall":
+                    from src.collectors.firewall import FirewallCollector
+                    collector = FirewallCollector()
+                records = collector.collect()
+                if records:
+                    database.store_records(records)
+            except Exception as e:
+                print(f"[force_refresh] {collector_name} failed: {e}")
+
+        threading.Thread(target=_run, daemon=True).start()
+        return {"ok": True, "collector": collector_name}
+
     # returns table data (collector health, current metrics, recent events) in one call
     def get_snapshot(self) -> dict:
         return database.dashboard_snapshot()
@@ -807,6 +836,22 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     letter-spacing: 0.5px;
 }
 
+.status-box.direct {
+    border-color: #7c9ecf;         
+    background: rgba(124, 158, 207, 0.05);
+}
+.status-box.direct .label {
+    color: #7c9ecf;
+    text-shadow: 0 0 6px rgba(124, 158, 207, 0.35);
+}
+.status-box.direct .value {
+    color: #a5c3ea;                
+    text-shadow: 0 0 8px rgba(124, 158, 207, 0.45);
+}
+.status-box.direct .sub {
+    color: rgba(165, 195, 234, 0.65);
+}
+
 .status-box.ok {
     border-color: var(--green-dim);
     background: rgba(95, 207, 95, 0.04);
@@ -839,6 +884,55 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     color: var(--cyan);
     letter-spacing: 1px;
 }
+
+/* age indicator in top left of each status box. mirrors the AGE column in the
+   telemetry readout but localized to the box, so refreshing a box gives
+   immediate visual feedback right where the user is already looking */
+.status-age {
+    position: absolute;
+    top: 8px;
+    left: 10px;
+    color: var(--cyan-dim);
+    font-family: 'Cascadia Mono', 'Consolas', monospace;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    opacity: 0.7;
+    text-shadow: var(--glow-cyan);
+}
+
+/* small refresh button */
+.status-refresh-btn {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    background: transparent;
+    color: var(--cyan-dim);
+    border: 1px solid var(--cyan-dim);
+    border-radius: 50%;
+    font-family: inherit;
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0.5;
+    transition: all 0.15s ease;
+    text-shadow: var(--glow-cyan);
+}
+.status-refresh-btn:hover {
+    opacity: 1;
+    color: var(--cyan);
+    border-color: var(--cyan);
+}
+.status-refresh-btn.spinning {
+    animation: refresh-spin 0.6s linear;
+}
+@keyframes refresh-spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+}
+.status-box { position: relative; }  /* if not already set — needed for absolute positioning */
 
 /* alarm overlay: strobing EMERGENCY box centered over the dashboard.
    only the box itself flashes. no full-screen tint, no fade, no shake.
@@ -1398,21 +1492,29 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
         <div id="status-strip">
             <span class="panel-title">[ STATUS ] <button class="info-btn" data-info="status">i</button></span>
             <div class="status-box na" id="status-wifi">
+                <button class="status-refresh-btn" data-collector="status" title="Force refresh">⟳</button>
+                <div class="status-age">—</div>
                 <div class="label">WI-FI</div>
                 <div class="value">-</div>
                 <div class="sub">initializing</div>
             </div>
             <div class="status-box na" id="status-internet">
+                <button class="status-refresh-btn" data-collector="status" title="Force refresh">⟳</button>
+                <div class="status-age">—</div>
                 <div class="label">INTERNET</div>
                 <div class="value">-</div>
                 <div class="sub">initializing</div>
             </div>
             <div class="status-box na" id="status-vpn">
+                <button class="status-refresh-btn" data-collector="status" title="Force refresh">⟳</button>
+                <div class="status-age">—</div>
                 <div class="label">VPN</div>
                 <div class="value">-</div>
                 <div class="sub">initializing</div>
             </div>
             <div class="status-box na" id="status-firewall">
+                <button class="status-refresh-btn" data-collector="status" title="Force refresh">⟳</button>
+                <div class="status-age">—</div>
                 <div class="label">FIREWALL</div>
                 <div class="value">-</div>
                 <div class="sub">initializing</div>
@@ -1938,6 +2040,18 @@ function renderEvents(rows) {
 function renderStatus(status) {
     if (!status) return;
 
+    const wifiAgeEl = wifiBox.querySelector(".status-age");
+    if (wifiAgeEl) wifiAgeEl.textContent = wifi.ts ? ago(wifi.ts) : "—";
+
+    const inetAgeEl = inetBox.querySelector(".status-age");
+    if (inetAgeEl) inetAgeEl.textContent = inet.ts ? ago(inet.ts) : "—";
+
+    const vpnAgeEl = vpnBox.querySelector(".status-age");
+    if (vpnAgeEl) vpnAgeEl.textContent = vpn.ts ? ago(vpn.ts) : "—";
+
+    const fwAgeEl = fwBox.querySelector(".status-age");
+    if (fwAgeEl) fwAgeEl.textContent = fw.ts ? ago(fw.ts) : "—";
+
     // wi-fi
     const wifi = status.wifi_status;
     const wifiBox = document.getElementById("status-wifi");
@@ -1982,7 +2096,7 @@ function renderStatus(status) {
         const map = {
             "connected":  { cls: "ok", label: "TUNNELED",
                             sub: "tunnel active, target reachable via VPN" },
-            "not_needed": { cls: "ok", label: "DIRECT",
+            "not_needed": { cls: "direct", label: "DIRECT",
                             sub: "target reachable without tunnel" },
             "broken":     { cls: "bad", label: "BROKEN",
                             sub: "adapter up but tunnel not delivering" },
@@ -2174,7 +2288,7 @@ function initChart() {
         backgroundColor: TRACE_COLORS[target] + "20",
         borderWidth: 1.5,
         pointRadius: 0,
-        pointHoverRadius: 0
+        pointHoverRadius: 0,
         tension: 0.35,
         cubicInterpolationMode: "monotone",
         fill: false,
@@ -2381,6 +2495,7 @@ function bootUiOnly() {
     initIncidentLogButton(); 
     initExportButton();
     initClearDataButton();
+    initStatusRefreshButtons();
 }
 
 /* watermark for the alarm system: only fire for events strictly newer than this.
@@ -2531,6 +2646,30 @@ function initClearDataButton() {
     });
 }
 
+/* wire the small refresh buttons on each status box. these trigger an
+   immediate collector run without waiting for the next scheduled cycle */
+function initStatusRefreshButtons() {
+    document.querySelectorAll(".status-refresh-btn").forEach(btn => {
+        btn.addEventListener("click", async (e) => {
+            e.stopPropagation();
+            const collector = btn.dataset.collector;
+            if (!collector) return;
+            btn.classList.add("spinning");
+            try {
+                await window.pywebview.api.force_collector_refresh(collector);
+                // spin animation continues while collector runs, then we
+                // trigger an immediate dashboard tick to show fresh data
+                setTimeout(async () => {
+                    try { await tickSnapshot(); } catch (e) { /* ignore */ }
+                    btn.classList.remove("spinning");
+                }, 800);
+            } catch (err) {
+                btn.classList.remove("spinning");
+            }
+        });
+    });
+}
+
 function bootPolling() {
     tickSnapshot().finally(() => {
         function scheduleNext() {
@@ -2606,7 +2745,7 @@ def main() -> None:
     )
     # maximize on show: fills the monitor but keeps standard window chrome
     window.events.shown += lambda: window.maximize()
-    webview.start(gui="edgechromium") # add debug=True to enable DevTools and remote debugging here
+    webview.start(gui="edgechromium", debug=True) # add debug=True to enable DevTools and remote debugging here
 
     # # TODO: check inspect element test
     # # debug mode: enable DevTools access, remote debugging port, and inspect

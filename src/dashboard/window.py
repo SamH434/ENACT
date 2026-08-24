@@ -932,7 +932,7 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     from { transform: rotate(0deg); }
     to   { transform: rotate(360deg); }
 }
-.status-box { position: relative; }  /* if not already set — needed for absolute positioning */
+.status-box { position: relative; }  /* if not already set - needed for absolute positioning */
 
 /* alarm overlay: strobing EMERGENCY box centered over the dashboard.
    only the box itself flashes. no full-screen tint, no fade, no shake.
@@ -1493,28 +1493,28 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
             <span class="panel-title">[ STATUS ] <button class="info-btn" data-info="status">i</button></span>
             <div class="status-box na" id="status-wifi">
                 <button class="status-refresh-btn" data-collector="status" title="Force refresh">⟳</button>
-                <div class="status-age">—</div>
+                <div class="status-age">-</div>
                 <div class="label">WI-FI</div>
                 <div class="value">-</div>
                 <div class="sub">initializing</div>
             </div>
             <div class="status-box na" id="status-internet">
                 <button class="status-refresh-btn" data-collector="status" title="Force refresh">⟳</button>
-                <div class="status-age">—</div>
+                <div class="status-age">-</div>
                 <div class="label">INTERNET</div>
                 <div class="value">-</div>
                 <div class="sub">initializing</div>
             </div>
             <div class="status-box na" id="status-vpn">
                 <button class="status-refresh-btn" data-collector="status" title="Force refresh">⟳</button>
-                <div class="status-age">—</div>
+                <div class="status-age">-</div>
                 <div class="label">VPN</div>
                 <div class="value">-</div>
                 <div class="sub">initializing</div>
             </div>
             <div class="status-box na" id="status-firewall">
                 <button class="status-refresh-btn" data-collector="status" title="Force refresh">⟳</button>
-                <div class="status-age">—</div>
+                <div class="status-age">-</div>
                 <div class="label">FIREWALL</div>
                 <div class="value">-</div>
                 <div class="sub">initializing</div>
@@ -1908,7 +1908,7 @@ const COLLECTOR_STALL_THRESHOLD_SEC = {
 };
 
 /* actual expected interval per collector, used for countdown-to-next.
-   this mirrors the interval_sec values in main.py — if those change, update here */
+   this mirrors the interval_sec values in main.py - if those change, update here */
 const COLLECTOR_INTERVAL_SEC = {
     connectivity: 30,
     dns: 60,
@@ -2040,18 +2040,6 @@ function renderEvents(rows) {
 function renderStatus(status) {
     if (!status) return;
 
-    const wifiAgeEl = wifiBox.querySelector(".status-age");
-    if (wifiAgeEl) wifiAgeEl.textContent = wifi.ts ? ago(wifi.ts) : "—";
-
-    const inetAgeEl = inetBox.querySelector(".status-age");
-    if (inetAgeEl) inetAgeEl.textContent = inet.ts ? ago(inet.ts) : "—";
-
-    const vpnAgeEl = vpnBox.querySelector(".status-age");
-    if (vpnAgeEl) vpnAgeEl.textContent = vpn.ts ? ago(vpn.ts) : "—";
-
-    const fwAgeEl = fwBox.querySelector(".status-age");
-    if (fwAgeEl) fwAgeEl.textContent = fw.ts ? ago(fw.ts) : "—";
-
     // wi-fi
     const wifi = status.wifi_status;
     const wifiBox = document.getElementById("status-wifi");
@@ -2061,6 +2049,9 @@ function renderStatus(status) {
             wifiBox.className = "status-box ok";
             wifiBox.querySelector(".value").textContent = "CONNECTED";
             wifiBox.querySelector(".sub").textContent = `SSID: ${ssid}`;
+            // update the age indicator: same info as telemetry readout's AGE column
+            const wifiAgeEl = wifiBox.querySelector(".status-age");
+            if (wifiAgeEl) wifiAgeEl.textContent = wifi.ts ? ago(wifi.ts) : "-";
         } else if (wifi.value === "disconnected") {
             wifiBox.className = "status-box bad";
             wifiBox.querySelector(".value").textContent = "DISCONNECTED";
@@ -2077,6 +2068,8 @@ function renderStatus(status) {
     const inet = status.internet_status;
     const inetBox = document.getElementById("status-internet");
     if (inet) {
+        const inetAgeEl = inetBox.querySelector(".status-age");
+        if (inetAgeEl) inetAgeEl.textContent = inet.ts ? ago(inet.ts) : "-";
         const map = {
             "ok":   { cls: "ok",  label: "ONLINE",  sub: "TCP probe reached public internet" },
             "down": { cls: "bad", label: "OFFLINE", sub: "TCP probes to 1.1.1.1 and 8.8.8.8 failed" },
@@ -2093,6 +2086,8 @@ function renderStatus(status) {
     const vpn = status.vpn_status;
     const vpnBox = document.getElementById("status-vpn");
     if (vpn) {
+        const vpnAgeEl = vpnBox.querySelector(".status-age");
+        if (vpnAgeEl) vpnAgeEl.textContent = vpn.ts ? ago(vpn.ts) : "-";
         const map = {
             "connected":  { cls: "ok", label: "TUNNELED",
                             sub: "tunnel active, target reachable via VPN" },
@@ -2116,6 +2111,8 @@ function renderStatus(status) {
     const fw = status.firewall_summary;
     const fwBox = document.getElementById("status-firewall");
     if (fw && fwBox) {
+        const fwAgeEl = fwBox.querySelector(".status-age");
+        if (fwAgeEl) fwAgeEl.textContent = fw.ts ? ago(fw.ts) : "-";
         const enabled = fw.meta && fw.meta.enabled_count;
         const total = fw.meta && fw.meta.total_profiles;
         if (enabled === undefined || enabled === null) {

@@ -892,12 +892,12 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     position: absolute;
     top: 8px;
     left: 10px;
-    color: var(--cyan-dim);
+    color: var(--amber);
     font-family: 'Cascadia Mono', 'Consolas', monospace;
-    font-size: 10px;
+    font-size: 12px;
+    font-weight: bold;
     letter-spacing: 0.5px;
-    opacity: 0.7;
-    text-shadow: var(--glow-cyan);
+    text-shadow: var(--glow-amber);
 }
 
 /* small refresh button */

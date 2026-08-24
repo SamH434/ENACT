@@ -900,7 +900,18 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     text-shadow: var(--glow-amber);
 }
 
-/* small refresh button */
+.firewall-badge {
+    position: absolute;
+    top: 8px;
+    left: 10px;
+    color: var(--amber);
+    font-family: 'Cascadia Mono', 'Consolas', monospace;
+    font-size: 11px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+    text-shadow: var(--glow-amber);
+}
+
 .status-refresh-btn {
     position: absolute;
     top: 6px;
@@ -909,25 +920,27 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     height: 20px;
     padding: 0;
     background: transparent;
-    color: var(--cyan-dim);
-    border: 1px solid var(--cyan-dim);
+    color: var(--cyan);
+    border: 1px solid var(--cyan);
     border-radius: 50%;
     font-family: inherit;
     font-size: 12px;
+    font-weight: bold;
     line-height: 1;
     cursor: pointer;
-    opacity: 0.5;
+    opacity: 1;
     transition: all 0.15s ease;
     text-shadow: var(--glow-cyan);
 }
 .status-refresh-btn:hover {
-    opacity: 1;
-    color: var(--cyan);
-    border-color: var(--cyan);
+    background: var(--cyan);
+    color: black;
+    text-shadow: none;
 }
 .status-refresh-btn.spinning {
     animation: refresh-spin 0.6s linear;
 }
+
 @keyframes refresh-spin {
     from { transform: rotate(0deg); }
     to   { transform: rotate(360deg); }
@@ -1513,8 +1526,7 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
                 <div class="sub">initializing</div>
             </div>
             <div class="status-box na" id="status-firewall">
-                <button class="status-refresh-btn" data-collector="status" title="Force refresh">⟳</button>
-                <div class="status-age">-</div>
+                <div class="firewall-badge" id="firewall-badge">-</div>
                 <div class="label">FIREWALL</div>
                 <div class="value">-</div>
                 <div class="sub">initializing</div>
@@ -2106,15 +2118,14 @@ function renderStatus(status) {
         vpnBox.querySelector(".sub").textContent = info.sub;
     }
 
-    // firewall: reads the firewall_summary metric which is enabled-profile count.
-    // 3 = fully enabled (green), 1-2 = partial (yellow), 0 = fully disabled (red)
+    // firewall: reads the firewall_summary metric. 3/3 = green (active),
+    // 1-2/3 = yellow (partial), 0/3 = red (fully disabled)
     const fw = status.firewall_summary;
     const fwBox = document.getElementById("status-firewall");
     if (fw && fwBox) {
-        const fwAgeEl = fwBox.querySelector(".status-age");
-        if (fwAgeEl) fwAgeEl.textContent = fw.ts ? ago(fw.ts) : "-";
         const enabled = fw.meta && fw.meta.enabled_count;
         const total = fw.meta && fw.meta.total_profiles;
+
         if (enabled === undefined || enabled === null) {
             fwBox.className = "status-box na";
             fwBox.querySelector(".value").textContent = "UNKNOWN";
@@ -2133,8 +2144,19 @@ function renderStatus(status) {
             fwBox.querySelector(".sub").textContent =
                 `${enabled}/${total} profiles enabled`;
         }
+
+        // static amber badge with the enabled/total count
+        const fwBadge = document.getElementById("firewall-badge");
+        if (fwBadge) {
+            if (enabled !== undefined && total !== undefined) {
+                fwBadge.textContent = `${enabled}/${total} ACTIVE`;
+            } else {
+                fwBadge.textContent = "-";
+            }
+        }
     }
 }
+
 
 /* classifies the chart's data state and updates the overlay label accordingly.
    called on every snapshot tick so it reacts quickly to state changes.

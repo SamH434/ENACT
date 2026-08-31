@@ -1995,7 +1995,7 @@ function renderMetrics(rows) {
    changing data stands out from the surrounding prose. patterns handled:
      - IPs (1.1.1.1, 8.8.8.8, etc.)
      - hex fingerprints (12+ char hex strings)
-     - transitions "A -> B" or "A → B"
+     - transitions "A -> B" or "A -> B"
      - numbers followed by ms, %, etc.
      - hop counts like "hops 9 -> 13"
    the wrapped tokens get a border matching the severity color so the eye
@@ -2014,7 +2014,7 @@ function boxifySummary(summary) {
     s = s.replace(/\b(hops|count|rate|drop)\s+(\d+)\b/gi,
                   '$1 <span class="val-box val-num">$2</span>');
     // style the transition arrow itself so it visually separates before/after
-    s = s.replace(/\s->\s/g, ' <span class="val-arrow">→</span> ');
+    s = s.replace(/\s->\s/g, ' <span class="val-arrow">-></span> ');
     return s;
 }
 
@@ -2764,7 +2764,7 @@ def main() -> None:
     )
     # maximize on show: fills the monitor but keeps standard window chrome
     window.events.shown += lambda: window.maximize()
-    webview.start(gui="edgechromium", debug=True) # add debug=True to enable DevTools and remote debugging here
+    webview.start(gui="edgechromium") # add debug=True to enable DevTools and remote debugging here
 
     # # TODO: check inspect element test
     # # debug mode: enable DevTools access, remote debugging port, and inspect

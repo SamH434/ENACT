@@ -1,7 +1,5 @@
 # ENACT: Laws of Operation
 
-**Version 1.0 2026**
-
 This document defines what ENACT considers an anomaly, why, and at what
 severity. It exists so operators (and reviewers) can evaluate whether ENACT
 is reporting things at the right level of concern rather than dressing up
@@ -25,18 +23,8 @@ tool** for Windows.
 - **Correlation-focused**: the differentiator versus a basic "ping and DNS"
   monitor is that ENACT surfaces cross-signal evidence with every event,
   because real network failures rarely present as a single signal.
-
-**What ENACT is not:**
-
-- Not a replacement for enterprise NPM/APM systems (SolarWinds, Datadog,
-  ThousandEyes). It shares design principles with those systems at a
-  fraction of the scope.
-- Not a security tool. No port scanning, no packet injection, no ICMP
-  flooding, no offensive operations.
-- Not a network path optimizer. It reports; it does not remediate.
-- Not a probe of third-party services. Its reachability targets are
-  intentionally limited to well-known public DNS resolvers
-  (`1.1.1.1`, `8.8.8.8`, `9.9.9.9`) and DNS hostname lookups.
+ 
+ENACT is NOT a replacement for enterprise NPM/APM systems
 
 ---
 
@@ -137,7 +125,7 @@ severity assignment is appropriate.
 
 **Rule:** Compute a rolling median from the last N latency samples (baseline).
 Fire an event when the current sample is at least `MULTIPLIER × baseline`
-AND above `ABSOLUTE_FLOOR_MS`. The floor prevents firing on "5ms → 15ms"
+AND above `ABSOLUTE_FLOOR_MS`. The floor prevents firing on "5ms -> 15ms"
 noise, which is a 3x multiplier but not operationally meaningful.
 
 **Current thresholds:**
@@ -166,8 +154,8 @@ records indicate failed lookups.
 **Rule:** Over the last N DNS samples, compute the failure rate
 (failed / total). Emit at severity tiers based on the rate:
 
-- Failure rate ≥ `CRITICAL_RATE` → `critical`
-- Failure rate ≥ `WARNING_RATE` → `warning`
+- Failure rate ≥ `CRITICAL_RATE` -> `critical`
+- Failure rate ≥ `WARNING_RATE` -> `warning`
 - Otherwise no event
 
 **Current thresholds:**
@@ -242,7 +230,7 @@ a compound event. This is the natural next step of the correlation model.
 **Watches:** firewall collector's `firewall_profile_state` metric.
 
 **Rule:** For each of the three profiles (Domain, Private, Public), compare
-the two most recent samples. Fire a warning event on the specific ON → OFF
+the two most recent samples. Fire a warning event on the specific ON -> OFF
 transition. Per-profile debounce prevents re-firing during a sustained-off
 state.
 
@@ -309,20 +297,15 @@ evidence is intrinsic to the anomaly (the DNS failure rate, the RSSI drop
 magnitude). Some is *contextual*, essentially a snapshot of what other collectors
 were reporting in the same time window.
 
-The contextual evidence is the honest answer to "what else was happening
-when this fired?" The current implementation captures samples from every
-collector within a ±60-second window around the event timestamp, and
-attaches them under `concurrent_samples`.
-
 **How to read it as an operator:**
 
-- **DNS outage with normal RSSI and normal route** → probably upstream
+- **DNS outage with normal RSSI and normal route** -> probably upstream
   (resolver-side).
-- **DNS outage with elevated latency and Wi-Fi degradation** → probably
+- **DNS outage with elevated latency and Wi-Fi degradation** -> probably
   wireless-level (your link is bad, everything downstream suffers).
-- **Latency spike with a fresh route change in the same window** → the new
+- **Latency spike with a fresh route change in the same window** -> the new
   route is worse than the old one; the ISP shifted your path suboptimally.
-- **Wi-Fi degradation with no DNS or latency impact** → early warning; your
+- **Wi-Fi degradation with no DNS or latency impact** -> early warning; your
   signal weakened but the network is still absorbing it.
 
 The evidence panel in the incident window surfaces this so an operator
@@ -330,7 +313,86 @@ doesn't have to hold four charts in their head to reason about causality.
 
 ---
 
-## 6. Known blind spots and honest limitations
+## 6. Security and engineering posture
+
+ENACT's positioning as an observability tool (not a security tool) doesn't
+mean security discipline is absent from its implementation. This section
+documents the concrete engineering choices that reduce risk to the operator
+running it, and the deliberate limits on what ENACT will attempt.
+
+### Passive-only by design
+
+ENACT does not send unsolicited traffic to any host it observes. Specifically:
+
+- **No active scanning.** ENACT does not scan ports, enumerate services, or
+  probe arbitrary hosts. TCP probes exist only against fixed reachability
+  targets (public anycast DNS) and the host's own default gateway.
+- **No packet injection.** ENACT does not craft, spoof, or replay network
+  packets. No Scapy, no raw sockets, no monitor-mode Wi-Fi capture.
+- **No offensive Wi-Fi operations.** The rogue AP detector observes what the
+  OS's normal Wi-Fi scanning already sees. It does not deauthenticate, does
+  not attempt to associate with suspicious APs, does not probe them.
+
+This posture is a **deliberate design constraint**, not a limitation waiting
+to be lifted. Active scanning has legal and ethical surface area
+that varies by jurisdiction and network ownership. Keeping ENACT strictly
+passive means an operator can run it on any network (including networks
+they don't own, like a coffee shop or hotel Wi-Fi) without risk of
+misbehavior.
+
+### Input handling
+
+- **Parameterized SQL only.** All database queries use SQLite's parameter
+  substitution (`?` placeholders). No user input is ever concatenated into
+  SQL strings, eliminating SQL injection as a risk category.
+- **No arbitrary path handling.** File writes (export logs, screenshot
+  saves) go only to user-selected paths via native OS file dialogs. ENACT
+  does not accept file paths from configuration files, network input, or
+  environment variables.
+- **Subprocess arguments are lists, never shell strings.** All calls to
+  `netsh`, `tracert`, `ping`, `ipconfig` pass arguments as Python lists to
+  `subprocess.run`, which bypasses shell interpretation entirely. Command
+  injection is not possible from within ENACT's own code.
+
+### Resource discipline
+
+- **Bounded database growth.** Old samples, runs, and events are
+  automatically pruned by the scheduler on a periodic cycle (default: 7-day
+  retention, pruning every hour). The database cannot grow unbounded.
+- **Bounded work per cycle.** Each collector has a subprocess timeout and
+  runs on its own interval; a slow or hung external command cannot block
+  the entire system. A failing collector logs the error and continues on
+  the next cycle without crashing the process.
+- **Bounded query cost.** Dashboard queries use compound indexes so cost
+  scales with result size, not table size. Median dashboard tick is under
+  50ms even with hundreds of thousands of stored samples (see stress tests
+  in `tests/test_stress.py`).
+- **Bounded UI subprocess spawning.** The TRIGGER TEST INCIDENT button
+  has a hard rate limit at both the JS layer (5s cooldown) and the Python
+  layer (max 3 launches per 15 seconds), preventing spam-click resource
+  exhaustion of incident window subprocesses.
+
+### What ENACT does NOT try to defend against
+
+An honest posture also states what's out of scope:
+
+- ENACT does not defend against a malicious operator running it on their
+  own machine. If you can run arbitrary Python, you can already do anything
+  ENACT does.
+- ENACT does not defend against modification of its own SQLite file. An
+  attacker with write access to `data/enact.db` can alter historical data.
+- ENACT does not defend against tampering with `netsh` / `tracert` /
+  `ipconfig` output. It trusts the OS's system tools to return truthful
+  data about the machine's own state.
+- ENACT does not encrypt its stored data. It runs on a single trusted host
+  and is not designed for hostile-storage environments.
+
+These are not oversights — they're the correct scope decisions for a
+single-host observability tool. Defending against a compromised host is
+what an EDR or SIEM does, and mixing scope would produce a worse version
+of both.
+
+## 7. Known blind spots and honest limitations
 
 A truthful spec includes what the tool *cannot* see.
 
@@ -366,7 +428,7 @@ A truthful spec includes what the tool *cannot* see.
 
 ---
 
-## 7. Operator's playbook
+## 8. Operator's playbook
 
 Quick reference for interpreting the dashboard at a glance.
 
@@ -410,7 +472,7 @@ Quick reference for interpreting the dashboard at a glance.
 
 ---
 
-## 8. Revision history
+## 9. Revision history
 
 - **v1.0 (2026)** : Initial specification. Defines the five collectors,
   four analyzers, three severity tiers, and the operator's playbook.

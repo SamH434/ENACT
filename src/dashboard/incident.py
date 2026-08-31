@@ -604,7 +604,7 @@ function renderEvidence(evidence) {
         if ((k === "old_hops" || k === "new_hops") && Array.isArray(v)) {
             items.push(`<li>
                 <span class="k">${escapeHtml(k.toUpperCase())}</span>
-                <span class="v">${escapeHtml(v.join(" → "))}</span>
+                <span class="v">${escapeHtml(v.join(" -> "))}</span>
             </li>`);
             continue;
         }

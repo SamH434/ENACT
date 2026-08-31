@@ -169,3 +169,75 @@ class TestPruningPerformance:
         assert deleted > 0, "prune should have removed some rows"
 
 
+class TestAnalyzerPerformance:
+
+    def test_latency_spike_analyzer_under_sla(self, temp_db, make_record):
+        """
+        LatencySpikeAnalyzer looks at recent connectivity samples. With
+        realistic data, run() should complete under SLA.
+        """
+        from src.storage import database
+        from src.analyzers.latency_spike import LatencySpikeAnalyzer
+
+        _seed_bulk_samples(database, make_record, count=10_000,
+                           collectors=["connectivity"])
+
+        analyzer = LatencySpikeAnalyzer()
+        
+        analyzer.run()
+
+        times_ms = []
+        for _ in range(5):
+            start = time.perf_counter()
+            analyzer.run()
+            times_ms.append((time.perf_counter() - start) * 1000)
+
+        median_ms = sorted(times_ms)[len(times_ms) // 2]
+        assert median_ms < SLA_ANALYZER_MS, (
+            f"LatencySpikeAnalyzer.run() median: {median_ms:.0f}ms "
+            f"(SLA: {SLA_ANALYZER_MS}ms)"
+        )
+
+    def test_dns_outage_analyzer_under_sla(self, temp_db, make_record):
+        """DNSOutageAnalyzer looks at recent DNS samples."""
+        from src.storage import database
+        from src.analyzers.dns_outage import DNSOutageAnalyzer
+
+        _seed_bulk_samples(database, make_record, count=10_000,
+                           collectors=["dns"])
+
+        analyzer = DNSOutageAnalyzer()
+        analyzer.run()
+
+        times_ms = []
+        for _ in range(5):
+            start = time.perf_counter()
+            analyzer.run()
+            times_ms.append((time.perf_counter() - start) * 1000)
+
+        median_ms = sorted(times_ms)[len(times_ms) // 2]
+        assert median_ms < SLA_ANALYZER_MS, (
+            f"DNSOutageAnalyzer.run() median: {median_ms:.0f}ms"
+        )
+
+
+class TestSampleThroughput:
+
+    def test_bulk_insert_throughput(self, temp_db, make_record):
+        """
+        Inserting 1000 samples in a single batch should complete in under 1s.
+        Real inserts are batched by the scheduler, so this reflects worst-case
+        bursty write behavior.
+        """
+        from src.storage import database
+
+        records = [make_record() for _ in range(1000)]
+        start = time.perf_counter()
+        count = database.store_records(records)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+
+        assert count == 1000
+        assert elapsed_ms < 1000, (
+            f"1000 record insert took {elapsed_ms:.0f}ms - "
+            f"batching regression?"
+        )

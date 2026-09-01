@@ -18,11 +18,11 @@ The differentiator versus a naive network monitor is the correlation model. Coll
 ## Screenshots
 
 <p align="left">
-  <img src="screenshots/dashboard.png" alt="ENACT dashboard" width="900">
+  <img src="screenshots/DashboardSC1.png" alt="ENACT dashboard" width="900">
 </p>
 
 <p align="left">
-  <img src="screenshots/incident.png" alt="Incident response window" width="900">
+  <img src="screenshots/IncidentSC1.png" alt="Incident response window" width="900">
 </p>
 
 ## Quickstart
@@ -97,13 +97,13 @@ The status collector was originally implemented against passive netsh/ipconfig o
 | firewall_disabled | Windows Defender Firewall profile transitions enabled to disabled | warning |
 | rogue_ap | Known SSID observed from a new BSSID (evil-twin heuristic) | info |
 
-Each threshold is defended with an "honesty check" section in `docs/OPERATIONS.md`. The bar for `critical` severity is deliberately narrow: sustained failure of a whole subsystem, not any single-cycle anomaly. This avoids the alarm-fatigue trap that destroys the value of monitoring tools.
+Each threshold is defended with an "honesty check" section in `docs/OPERATIONS.md`. The bar for `critical` severity is deliberately narrow.
 
 Critical events trigger a full-screen alarm strobe on the main dashboard and open a dedicated incident window with the event summary, a probable-cause hint, and cross-signal evidence from every collector active in the same time window. Past incidents remain browsable via the INCIDENTS button in the event log.
 
-## Testing and engineering discipline
+## Testing
 
-The project has 81 tests across six files covering the storage layer, analyzers, parsers, records, imports, and stress performance. GitHub Actions CI runs the fast suite on every push across Python 3.10, 3.11, and 3.12.
+The project has 81 tests across six files covering the storage layer, analyzers, parsers, records, imports, and stress performance. GitHub Actions CI runs the suite on every push across Python 3.10, 3.11, and 3.12.
 
 Some of the concrete engineering problems solved during development:
 
@@ -112,40 +112,4 @@ Some of the concrete engineering problems solved during development:
 - **VPN state detection was lying.** Passive adapter checks (ipconfig) reported VPN as "connected" long after the tunnel was functionally dead. Rewrote the status collector to use active TCP probes against destinations that require the tunnel, honestly reporting `broken` when the adapter existed but couldn't deliver.
 - **Alarm watermark race condition.** After clearing telemetry data (and optionally resetting IDs), new critical events were silently ignored because the alarm watcher's in-memory watermark still referenced pre-clear IDs. Fixed by resetting the watermark to `null` in the clear success handler, letting the watcher's bootstrap logic re-initialize on the next poll.
 
-Engineering practices baked into the codebase:
-
-- **Passive-only design.** No active scanning, no packet injection, no offensive Wi-Fi operations. The rogue AP detector observes what the OS's normal scanning already sees.
-- **Parameterized SQL only.** All queries use SQLite parameter substitution. No string concatenation, no injection surface.
-- **Subprocess arguments as lists.** All calls to netsh, tracert, ping, ipconfig pass arguments as Python lists to `subprocess.run`, bypassing shell interpretation entirely.
-- **Bounded database growth.** Automatic pruning of samples, runs, and events older than 7 days (configurable), running hourly via the scheduler.
-- **Bounded UI subprocess spawning.** The test-incident button has both JS-side (5s cooldown) and Python-side (3 launches per 15 seconds) rate limits.
-
-See `docs/OPERATIONS.md` § 6 (Security and engineering posture) for full detail on these decisions.
-
-## What ENACT deliberately does not do
-
-Not every network-adjacent capability belongs in a single-host observability tool. ENACT does not include:
-
-- Machine learning or statistical anomaly detection. Analyzers are rule-based with defended thresholds.
-- Active scanning (port scans, service enumeration, Nmap). Nothing that could look like unauthorized probing.
-- Packet capture or protocol analysis. No Scapy, no raw sockets, no promiscuous-mode Wi-Fi.
-- Distributed or multi-host monitoring. Every observation is from a single machine's perspective.
-- Cloud services or hosted deployment. Local install only.
-- Authentication or multi-user support. Single operator, single machine.
-- Offensive security operations of any kind.
-
-These are called out explicitly because scope was chosen deliberately, not accidentally shallow.
-
-## Documentation
-
-- `docs/OPERATIONS.md`: severity model, per-analyzer specifications with honesty checks, security posture, operator playbook
-- `docs/architecture.md`: module layout, data flow, design decisions
-- `docs/roadmap.md`: phase history and planned improvements
-
-## Tech stack
-
-Python 3.10+, SQLite (WAL mode), pywebview + WebView2, Chart.js, pytest, GitHub Actions
-
-## License
-
-MIT. See `LICENSE`.
+See `docs/OPERATIONS.md` § 6 (Security and engineering posture) for full detail on design decisions.

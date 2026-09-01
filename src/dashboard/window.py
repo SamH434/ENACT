@@ -1589,8 +1589,8 @@ td.value-left { color: var(--amber-bright); font-weight: bold; text-align: left;
     <!-- footer with test-incident button on the left, hint text on the right -->
     <div id="footer">
         <button class="footer-btn" id="test-alarm-btn">TRIGGER TEST INCIDENT</button>
-        <span class="footer-hint">PRESS ALT+F4 OR CLOSE WINDOW TO DISENGAGE</span>
-        <span class="perf-readout" id="perf-readout">snapshot: </span>
+        <span class="footer-hint">PRESS ALT+F4 OR CLOSE WINDOW TO SHUT DOWN</span>
+        <span class="perf-readout" id="perf-readout"> ENACT </span>
     </div>
 
     <!-- alarm overlay: strobes the EMERGENCY word only, with static info below.
@@ -1695,23 +1695,23 @@ const CHART_REFRESH_MS = CHART_REFRESH_MS_PLACEHOLDER;
 const PANEL_INFO = {
     status: {
         title: "CONNECTIVITY STATUS",
-        body: "Live state of your Wi-Fi association, internet reachability, and VPN tunnel. WI-FI reports the SSID you're associated with. INTERNET is a composite of DNS resolution and ICMP reachability - a 'DEGRADED' reading typically means ICMP is filtered by a firewall or VPN while DNS still works. VPN reports whether a tunnel adapter is currently active on your machine.",
+        body: "Four boxes showing live network posture from active TCP probes, not passive OS state reads. WI-FI probes your default gateway to verify local network reachability. INTERNET probes 1.1.1.1 and 8.8.8.8 to verify the public internet is reachable. VPN probes a Western-accessible target (google.com) to verify the tunnel is actually delivering traffic: TUNNELED means the probe reached the target through a tunnel adapter, DIRECT means reachable without one, BROKEN means the adapter is up but the tunnel is not delivering. FIREWALL reports Windows Defender state across the three profiles (Domain, Private, Public). The refresh button on the first three boxes forces an immediate collector cycle without waiting for the scheduled interval.",
     },
     health: {
         title: "COLLECTOR HEALTH MONITOR",
-        body: "Reports the most recent cycle of each collector. UNIT is the collector name. LAST is how long ago it ran. STATUS is 'ok' if the cycle completed without error. DUR is how long the cycle took to run. SAMPLES is how many telemetry records it produced. If a status stays red or the LAST value grows unboundedly, that collector is unhealthy.",
+        body: "Reports each collector's most recent cycle. UNIT is the collector name. LAST is how long ago it ran. NEXT is the countdown to its next scheduled cycle. STATUS is 'ok' if the cycle completed without error. DUR is how long the cycle took. SAMPLES is how many telemetry records it produced. If LAST turns red, the collector has not cycled in more than 2x its expected interval, meaning it is likely stalled.",
     },
     metrics: {
         title: "TELEMETRY READOUT",
-        body: "The most recent value of every metric being collected. SOURCE is which collector produced it, METRIC identifies what's being measured, VALUE is the latest reading, and AGE is how long ago it was captured. This is the raw telemetry that analyzers reason over.",
+        body: "The most recent value of every metric being collected. SOURCE is the collector that produced it, METRIC identifies what is being measured, VALUE is the latest reading, AGE is how long ago it was captured. This is the raw data analyzers pull from to build cross-signal evidence when an event fires.",
     },
     events: {
         title: "EVENT LOG",
-        body: "Chronological log of anomalies detected by the analyzers. Each event has a persistent sequential ID (#1, #2, ...) that continues across ENACT restarts. Severity is INFO (routine change), WARN (something notable), or CRIT (something wrong). Critical events also trigger a full-screen alarm and open a dedicated incident window. Boxed values in each summary are the diagnostic data: fingerprints, IPs, hop counts, so the eye can catch what actually changed at a glance. All events (including historical criticals for the INCIDENTS log and this visible log) are stored in a SQLite database and can be exported to a plaintext session report using the EXPORT button.",
+        body: "Chronological log of anomalies detected by the analyzers. Each event has a persistent sequential ID (#1, #2, and so on) that continues across restarts and clears, unless you check the reset-IDs box when clearing. Severity is INFO (routine change), WARN (notable), or CRIT (something wrong). Critical events trigger a full-screen alarm and open a dedicated incident window. Boxed values in each summary highlight the specific data that changed: fingerprints, IPs, hop counts. INCIDENTS lists past critical events with click-to-reopen. EXPORT writes a plaintext session report. CLEAR wipes samples, runs, and events from the SQLite database at data/enact.db.",
     },
     latency: {
         title: "LATENCY TRACE LIVE REPORT",
-        body: "Live ping latency to three public DNS resolvers: Cloudflare, Google, and Quad9. Uses ICMP echo. If the chart shows 'NO DATA - ICMP BLOCKED OR UNREACHABLE', your network drops ping packets - common with VPNs and corporate firewalls - and this specific chart can't gather data. Other collectors (DNS resolution timing, route tracing) still work under those conditions.",
+        body: "Live ping latency to three public DNS resolvers: Cloudflare (1.1.1.1), Google (8.8.8.8), Quad9 (9.9.9.9). Uses ICMP echo. If the chart shows 'NO DATA · ICMP BLOCKED OR UNREACHABLE', your network drops ping packets (common with VPNs and corporate firewalls) and this specific chart cannot gather data. Other collectors like DNS resolution timing and route tracing still work under those conditions.",
     },
 };
 

@@ -1,9 +1,6 @@
 """
 Connectivity collector: pings configured targets and emits latency/loss.
 
-On Windows, 'ping <host> -n <count>' runs 'count' echo requests, parse the
-summary lines for sent/received/lost counts and the min/avg/max latency.
-
 Three failure modes are handled separately so a bad network never crashes
 the collector:
     timeout:        ping hung past our deadline, emit 100% loss record

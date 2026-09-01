@@ -8,12 +8,6 @@ Two distinct sets of records per cycle:
    signal. Tells us about the RF environment (congestion, channel
    overlap, new APs appearing)
 
-((Entirely passive))
-The radio listens for beacon frames that nearby access
-points broadcast on their own (same thing phone does when you open
-Wifi settings). So to clarify, no transmission, no probing, 
-no scanning in the illegal sense
-
 FYI: approximate dBm using the conventional formula:
     dBm ≈ (percent / 2) - 100
 So 100% ≈ -50 dBm (excellent), 50% ≈ -75 dBm (usable), 20% ≈ -90 dBm

@@ -1,9 +1,6 @@
 """
 DNS collector - resolves a list of hostnames and times each lookup.
 
-Uses Python's socket module directly rather than spawning nslookup, 
-stdlib does the heavy lifting.
-
 FYI: socket.getaddrinfo uses whatever DNS resolver the OS is configured to
 use (router, ISP, or whatever's set manually). We tag records as 'resolver:
 system' since we don't know which one actually answered without parsing

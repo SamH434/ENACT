@@ -1,16 +1,8 @@
 """
 Route collector - runs tracert against a target and produces a route fingerprint.
 
-The fingerprint is a hash of the sequence of intermediate hop IPs (don't
-care about the IPs themselves for anomaly detection) and whether or not the
-sequence changed since the last run. 
-
 Two consecutive collections with the same fingerprint = stable route
 Different fingerprints = the path changed
-
-Preserve timeouts in the fingerprint as a literal '*' so that "same route with
-the same timeouts" is treated as stable, but "timeout where there used to
-be a hop" registers as a change.
 """
 
 import hashlib

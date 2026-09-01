@@ -1,9 +1,6 @@
 """
 Firewall posture collector
 
-Reads local firewall configuration via 'netsh advfirewall show allprofiles'.
-This is passive introspection of the machine's own state, no network activity
-
 Windows has three profile types the firewall applies per active network:
     Domain:   corporate/Active Directory managed network
     Private:  home / trusted network

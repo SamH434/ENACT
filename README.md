@@ -29,22 +29,38 @@ The differentiator versus a naive network monitor is the correlation model. Coll
 
 Requires Python 3.10+ on Windows 10 or 11.
 
+**One-time install:**
+
 ```powershell
 git clone https://github.com/SamH434/ENACT.git
 cd ENACT
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python main.py
+.\setup-shortcut.ps1
 ```
 
-In a second terminal, launch the dashboard:
+The last line creates a desktop shortcut with the ENACT logo pointing at the silent launcher. If PowerShell blocks the script with an execution-policy error, run once with a bypass:
 
 ```powershell
+powershell -ExecutionPolicy Bypass -File .\setup-shortcut.ps1
+```
+
+**Running ENACT.** Two options depending on preference.
+
+*Recommended for daily use.* Double-click the **ENACT** shortcut on your desktop. The engine and dashboard both start silently. No terminal window remains open. Session logs are written to `logs/engine-session.log` and `logs/dashboard-session.log` for inspection if anything goes wrong.
+
+*Recommended for development.* Run the engine and dashboard in separate terminals so you can watch stdout live:
+
+```powershell
+# terminal 1
+python main.py
+
+# terminal 2
 python -m src.dashboard.window
 ```
 
-Or use the included launchers (`enact-dashboard.bat` for visible mode, `enact.vbs` for silent startup suitable for a desktop shortcut).
+The `enact-dashboard.bat` file is a middle-ground option that starts both processes in a visible cmd window, useful if you want to see the launcher's output but not maintain two terminals.
 
 ## Architecture
 

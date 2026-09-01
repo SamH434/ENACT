@@ -1,20 +1,6 @@
 """
 Connectivity status collector: active liveness probes for real network state.
 
-Distinct from the other collectors in that it doesn't produce raw telemetry.
-It emits three high-level readouts optimized for the dashboard's status
-panel, each backed by an active probe that tests whether traffic ACTUALLY
-flows to a specific destination.
-
-The prior implementation relied on Windows adapter state (netsh, ipconfig), This was unreliable:
-- Windows reports adapter existence long after a VPN tunnel is torn down
-- ipconfig on machines with virtual adapters can pick the wrong interface
-- DNS resolution against a local resolver "succeeds" even when the wider
-  network is broken, because the local process happily answers
-This version uses active TCP probes instead: attempt a connection to a
-known destination, honestly report the result. TCP handshake tells the truth
-in a way that reading Windows state does not.
-
     wifi_status:     TCP probe to the default gateway (are we on ANY network)
     internet_status: TCP probe to a public anycast host (does traffic reach the public internet)
     vpn_status:      TCP probe to a destination that requires the tunnel (is the VPN actually delivering)

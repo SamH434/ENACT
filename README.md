@@ -69,7 +69,7 @@ Four strictly separated layers:
 - **Analyzers** read from storage, apply rule-based thresholds, and emit events with cross-signal evidence. Stateless: all state lives in the database.
 - **Dashboard** is a native Windows window (pywebview + WebView2) rendering HTML/CSS/JS with a Chart.js streaming latency oscilloscope. A separate incident window subprocess launches automatically on critical events.
 
-A threaded scheduler runs each collector and analyzer as its own worker with broad exception handling, so one failure cannot crash the system. See `docs/architecture.md` for module layout and data flow.
+A threaded scheduler runs each collector and analyzer as its own worker with broad exception handling, so one failure cannot crash the system.
 
 ## Collectors
 

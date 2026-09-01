@@ -368,7 +368,7 @@ All points mentioned above will be deferred to v2.
 
 ## 7. Operator's playbook
 
-Quick reference for interpreting the dashboard, based on observered experience in IT enviornments and personal long-term observation.
+Quick reference for interpreting the dashboard, based on observed experience in IT environments and personal long-term observation.
 
 **Dashboard says INTERNET: OFFLINE, DNS ok**
 - ICMP is filtered somewhere between the host and the reachability targets.

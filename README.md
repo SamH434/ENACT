@@ -15,8 +15,6 @@ ENACT is a passive network observability platform for Windows. It runs six colle
 
 The differentiator versus a naive network monitor is the correlation model. Collectors do not share a clock or synchronize their work: each cycle is tagged with a `run_id` and UTC timestamp, and analyzers correlate independent signals via time-window bucketing rather than forced synchronization. Every detected event carries context from every collector active in the same window, giving operators the evidence needed to reason about causality without watching four charts simultaneously.
 
-## Screenshots
-
 <p align="left">
   <img src="screenshots/DashboardSC1.png" alt="ENACT dashboard" width="900">
 </p>
